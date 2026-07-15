@@ -92,3 +92,61 @@ Re-read the current repo state (confirmed it's still scaffold-only — empty `__
 Structured as a dependency graph (Mermaid) rather than a flat list, since several epics (e.g., E8 pipeline/scorecards vs. E6/E7 parsing/embedding) have no data dependency on each other and can run in parallel — the doc calls this out explicitly in the sequencing table rather than forcing a single linear order. Also carried forward four open questions already flagged in the docs (RAG-before-pilot sequencing, no LLM fallback provider, embedding-dimension migration risk, audit_log partitioning) into a "cross-cutting risks" section at the end, framed as sequencing implications rather than re-litigating them.
 
 Scope was deliberately held to backend only — frontend, calendar integration, ATS export, and the Scope Creep Watchlist items were excluded, matching [01-problem-space-and-scope.md](docs/01-problem-space-and-scope.md) and the v1 "does NOT ship" row in [09-roadmap.md](docs/09-roadmap.md). No code was written in this session.
+
+---
+
+## 2026-07-14 — Jira auth setup for EPIC.md → story sync
+
+**Prompt:**
+> we want to create the stories based on the epics in epic.md file in a new workspace on jira - create a .env file in root with the jira api key if applicable and update the .env.example file as well or give me a alternate method to auth my jira with this repository
+
+**Response summary:**
+No Jira MCP server was connected in this session (only a Linear connector showed up as available-but-unauthorized). Asked the user to choose between an Atlassian API token in `.env` (works immediately, no interactive OAuth needed) versus a Jira MCP server (requires an interactive browser step this non-interactive session can't perform) — user chose the API token route. Added `JIRA_BASE_URL`/`JIRA_EMAIL`/`JIRA_API_TOKEN`/`JIRA_PROJECT_KEY` to `.env.example` with a pointer to Atlassian's token-generation page, and created a git-ignored `.env` (verified via `git check-ignore`) with the same placeholders for the user to fill in directly rather than pasting the token into chat.
+
+---
+
+## 2026-07-15 — Create Jira project + first epic/stories/sprint from EPIC.md
+
+**Prompt:**
+> I have created the jira api token key use it to create a new project having the same name as the project repository and its associated key. Add it to the .env file and then create the first epic with associated tasks or backlogs or sprints
+
+**Response summary:**
+User filled in `JIRA_BASE_URL`/`JIRA_EMAIL`/`JIRA_API_TOKEN` in `.env` (Atlassian site `hexdefender.atlassian.net`). Verified the token via `GET /rest/api/3/myself`, then validated candidate project keys derived from the repo name (`virtual_hire`) via `GET /rest/api/3/projectvalidate/key` before committing to one, rather than guessing at Jira's key-format rules.
+
+Created a team-managed Scrum project (`POST /rest/api/3/project`, template `com.pyxis.greenhopper.jira:gh-simplified-agility-scrum`) named `virtual_hire` with key `VHIRE` — Scrum was chosen over Kanban specifically because the user asked for "backlogs or sprints," which the Scrum template ships with by default. Wrote `JIRA_PROJECT_KEY=VHIRE` into `.env`.
+
+Created the first Jira Epic (`VHIRE-1`) mirroring E1 — Foundational Data Layer & Migrations from [EPIC.md](EPIC.md) (summary, description, dependencies, definition of done copied from that epic's section), then created four Story issues (`VHIRE-2..5`) as children of that epic, one per E1 key deliverable (DB session/engine setup, SQLAlchemy models for all 11 tables, the Alembic migration covering pgvector/HNSW/RLS/triggers, and the settings module). Found the project's auto-created board (`GET /rest/agile/1.0/board`), created "Sprint 1 - E1 Data Layer" on it (first name attempt hit Jira's 30-character sprint-name limit, shortened and retried), and moved all four stories into that sprint via `POST /rest/agile/1.0/sprint/{id}/issue`. Verified placement by re-fetching the sprint's issues before reporting done.
+
+All Jira API calls were made directly via `curl`/Python `urllib` reading credentials from `.env` (`set -a; source .env; set +a`), writing multi-line JSON payloads to scratchpad files rather than inline shell strings after an inline single-quoted JSON payload failed to parse on the first attempt (a Windows Git Bash quoting issue, not a Jira-side error) — never printed the token itself to command output.
+
+---
+
+## 2026-07-15 — Pivot vector storage from pgvector to Qdrant (docs, EPIC.md, Jira)
+
+**Prompt:**
+> we are going to start coding. Typically we will follow the jira stories and sprints that we have defined. Change the db model from pgvector to a full qdrant db for vector embeddings and postgres for the rest of the models. Giving flexibility for both relational as well as vector searches and indexing. Re-write the stories in the jira considering this first and update the epic.md file accordingly in root too
+
+**Response summary:**
+This reverses the 2026-07-14 pivot's explicit "no dedicated vector database" decision in [docs/06-architecture.md](docs/06-architecture.md) and [docs/07-technical-stack.md](docs/07-technical-stack.md), which had argued a dedicated vector DB would double the tenant-isolation surface I2/I11 must be verified against. Since EPIC.md and the Jira stories both cite docs/03–09 directly, asked the user whether to propagate the change through the full doc set or just EPIC.md/Jira — user chose the full propagation, matching this project's established pattern from the prior pivot.
+
+Made one explicit architecture call not dictated by the user's prompt: **collection-per-organization** in Qdrant (rather than Qdrant's own recommended shared-collection-with-payload-filter multitenancy pattern), to preserve the same *structural* isolation boundary RLS gave Postgres, given I2's framing of cross-tenant leaks as "the most severe possible failure for this system." Documented this as a deliberate, named tradeoff (not a free upgrade) in every doc it touches, including the new operational costs it reintroduces.
+
+Rewrote: [docs/05-data-model.md](docs/05-data-model.md) (removed `resume_chunks` as a Postgres table, added a "Vector store (Qdrant)" section with the collection-per-org design, point/payload schema, and `resumes.embedding_status` as the new Postgres-side tracking column), [docs/06-architecture.md](docs/06-architecture.md) and [docs/07-technical-stack.md](docs/07-technical-stack.md) (full rewrites — component diagrams, sequence diagrams, multi-tenancy section, and an honest reversal of the prior "why not a dedicated vector database" argument, including Qdrant Cloud as the hosting choice to stay consistent with the existing managed-services posture). Targeted edits to [docs/04-invariants.md](docs/04-invariants.md) (I2/I11 enforcement mechanism), [docs/08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md) (Qdrant Cloud as a new subprocessor, and a new open question about the two-system deletion routine's partial-failure risk now that Postgres anonymization and Qdrant point deletion aren't one transaction), [docs/09-roadmap.md](docs/09-roadmap.md) (Gantt wording), [docs/03-ontology.md](docs/03-ontology.md) and [docs/README.md](docs/README.md) (stale references).
+
+Rewrote [EPIC.md](EPIC.md): E1 now Postgres-only (no vector schema); E3 gained a new deliverable (provision/tear down the org's Qdrant collection on org create/deactivate) and became a new dependency of E7; E7 was renamed "Vector Store Provisioning & Embedding Pipeline" and now targets Qdrant; E10's search task now queries Qdrant instead of a Postgres ANN index; E12's deletion routine now explicitly requires a compensating-action design for the new two-system consistency risk (not a bare best-effort call); E13's I11 test suite now proves collection-per-org isolation and collection-resolution correctness rather than RLS-filter correctness; E14 gained Qdrant to its readiness checks. Added a cross-cutting-risks entry for the new partial-provisioning/partial-deletion failure modes this pivot introduces.
+
+Updated `requirements.txt` (dropped `pgvector`, added `qdrant-client`) and `.env`/`.env.example` (`QDRANT_URL`/`QDRANT_API_KEY`), and added a `CHANGELOG.md` entry recording the pivot and every file it touched.
+
+Updated the existing Jira epic and its four stories in the `VHIRE` project (`VHIRE-1` through `VHIRE-5`) via the REST API to match E1's revised scope — `VHIRE-3`'s model list dropped `resume_chunks` and gained `embedding_status`/`embedding_error` on `resumes`; `VHIRE-4` dropped the `pgvector` extension/HNSW-index/vector-RLS scope entirely; `VHIRE-5` gained the new Qdrant env vars. Left Jira epics/stories for E3's collection-provisioning work and E7 (Qdrant embedding pipeline) uncreated for now, since only E1's sprint had been built out in Jira and the user's ask was to rewrite what already existed before coding begins, not to pre-build every future sprint.
+
+---
+
+## 2026-07-15 — Add CODE.md coding workflow
+
+**Prompt:**
+> we will complete sprint 1 from the jira backlog but before that create a code.md file in root that will create a coding best practice and workflow - typically the coding flow should follow the following steps - 1. from the jira story pick the next in line backlog item 2. Generate a stub / object model with docstrings and comments outlining the signature of the new additions 3. Wait for a human approvval 4. Once approved write test cases if required 5. concrete implementation and unit test pass test 6. Wait for human approval again 7 push to remote
+
+**Response summary:**
+Wrote `CODE.md` at the project root documenting the seven-step story lifecycle exactly as specified, with a Mermaid flowchart and steps 3/6 called out explicitly as hard stops (work does not proceed past them without an explicit in-conversation approval, and a round of requested changes loops back rather than counting as implicit approval). Filled in the specifics the user's outline left open, each grounded in this repo's existing conventions rather than invented generically: stub docstrings should state the contract (params/returns/raises/which invariant ID from [docs/04-invariants.md](docs/04-invariants.md) it enforces) since there's no implementation body yet for a reader to infer intent from — explicitly framed as a one-time exception to the project's normal terse/no-comments house style, reverting to that style once real implementation lands in step 5; step 4's "if required" was interpreted as scaling test rigor to the story's actual risk (pure scaffolding may need only a smoke test, invariant-enforcing logic needs contract tests written before the implementation); step 7 ties every commit message to its Jira key and keeps one story per commit.
+
+Added a "Definition of done" checklist per story (cross-referencing EPIC.md's own DoD language so a story can't quietly ship a superset or subset of what its epic actually calls for), a short note on when CHANGELOG.md entries are and aren't warranted (architecture-level, not per-story — consistent with how it's been used so far), and environment reminders (`.venv`-only installs, PowerShell/Bash-tool syntax, `.env` never committed) pulled from existing CLAUDE.md/EPIC.md conventions rather than restated generically. Left branching as direct-to-main (matching how this repo has operated in every prior session) with an open question flagging PR-based review as a possible future change rather than assuming it now. No code was written in this session.

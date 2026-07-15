@@ -19,7 +19,7 @@
 
 **v1 → v2** requires all of:
 - Success criteria from [00-ideation.md](00-ideation.md) trending toward target with at least one pilot organization (≥90% resumes without manual re-keying, ≥80% decisions with complete scorecards, ≥50% of RAG searches acted on).
-- Zero cross-tenant data isolation incidents (I2 **and I11** test suites green on every deploy, no exceptions found in pilot usage — the vector-search cross-tenant test is treated with the same release-blocker severity as the original relational-data test).
+- Zero cross-tenant data isolation incidents (I2 **and I11** test suites green on every deploy, no exceptions found in pilot usage — the Qdrant collection-per-organization cross-tenant test is treated with the same release-blocker severity as the Postgres RLS test, per [04-invariants.md](04-invariants.md)'s 2026-07-15 revision).
 - The three highest-confidence Open Unknowns from [02-assumptions.md](02-assumptions.md) validated with real pilot data (pipeline shape fit, resume format distribution, scorecard competency field adequacy), plus the embedding-quality unknown (A16) validated against real search usage.
 - **[NEEDS LEGAL REVIEW]** items in [08-privacy-and-compliance.md](08-privacy-and-compliance.md) resolved for at least the jurisdiction(s) the pilot organizations operate in, including the third-party AI subprocessor DPAs.
 
@@ -40,10 +40,10 @@ gantt
     Data model + FastAPI core        :v1a, 2026-08-01, 45d
     Ingestion + Extraction Agent parsing :v1b, after v1a, 30d
     Pipeline + scorecards UI         :v1c, after v1a, 45d
-    Embedding pipeline + pgvector index :v1e, after v1b, 25d
+    Qdrant collection provisioning + embedding pipeline :v1e, after v1b, 25d
     LLM crew - Summarizer + Reasoning Agents :v1f, after v1e, 30d
     RAG search UI                    :v1g, after v1f, 20d
-    Multi-tenancy hardening + I2/I11 test suites :v1d, after v1f, 20d
+    Multi-tenancy hardening + I2/I11 test suites (Postgres RLS + Qdrant collection isolation) :v1d, after v1f, 20d
     Pilot org onboarding             :milestone, after v1g, 0d
 
     section v2 - Integrations & Analytics

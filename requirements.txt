@@ -12,11 +12,13 @@ python-multipart==0.0.20
 pydantic==2.10.4
 pydantic-settings==2.7.1
 
-# Database (async SQLAlchemy + Postgres + pgvector)
+# Database (async SQLAlchemy + Postgres - relational data only)
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 alembic==1.14.0
-pgvector==0.3.6
+
+# Vector store (Qdrant - one collection per Organization, see docs/05-data-model.md)
+qdrant-client==1.12.1
 
 # Async task queue
 celery[redis]==5.4.0
