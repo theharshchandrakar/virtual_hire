@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sift
+      POSTGRES_PASSWORD: sift
+      POSTGRES_DB: sift
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sift"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local stand-in for Qdrant Cloud (see docs/07-technical-stack.md's Vector
+  # database row) - dev/test only, prod uses the managed service.
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  api:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      # Overrides .env's placeholders so the container reaches the other
+      # compose services by service name instead of localhost.
+      DATABASE_URL: postgresql+asyncpg://sift:sift@postgres:5432/sift
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+  # Celery worker services (parsing, embedding, crew, notification - one
+  # task definition each per docs/07-technical-stack.md and EPIC.md's E14)
+  # get added here once E5 lands a real Celery app to point `-A` at. No
+  # app/workers/ task modules exist yet (scaffold only), so a worker
+  # service defined today would just crash-loop.
+
+volumes:
+  postgres_data:
+  qdrant_data:

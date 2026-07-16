@@ -36,14 +36,34 @@ app/
 alembic/        migrations
 tests/          mirrors app/ structure
 docs/           architecture & product documentation (read first)
+Dockerfile      multi-stage build for the app image (API + future workers)
+docker-compose.yml  local stack: api + postgres + redis + qdrant
+entrypoint.sh   container startup: runs migrations, then execs the given command
 EPIC.md         v1 backend epics
 CODE.md         story lifecycle / coding workflow
 CONTRIBUTING.md branching, PR, and review rules
 ```
 
-## Setup
+## Running the app
 
-Requires Python 3.12. All installs go through the project's `.venv` — never a bare `pip install`.
+The app runs exclusively as a Docker container — there is no supported "run it bare on the host" path for the API/workers. Docker Desktop (or an equivalent engine) is the only requirement; you do not need Python installed locally just to run the app.
+
+```powershell
+copy .env.example .env
+# fill in .env with real values (AI provider keys, etc.) - DATABASE_URL/
+# REDIS_URL/QDRANT_URL are overridden by docker-compose.yml to point at
+# the compose-managed containers, so their .env values don't matter locally.
+
+docker compose up --build
+```
+
+This starts the API (`http://localhost:8000`, `/health` for a liveness check), plus Postgres, Redis, and a local Qdrant container standing in for Qdrant Cloud (dev/test only — see [docs/07-technical-stack.md](docs/07-technical-stack.md)). See [Dockerfile](Dockerfile), [docker-compose.yml](docker-compose.yml), and [entrypoint.sh](entrypoint.sh) for the image build and container startup (Alembic migrations run automatically before the app starts).
+
+Celery worker containers (parsing/embedding/crew/notification) aren't defined yet — `app/workers/` has no real Celery app to run until E5 lands; `docker-compose.yml` has a comment marking where they'll be added.
+
+## Development setup (tests / linting only)
+
+Docker runs the app; a local `.venv` is still used to write and run tests and lint, per [CODE.md](CODE.md)'s workflow. Requires Python 3.12. All installs go through `.venv` — never a bare `pip install`.
 
 ```powershell
 # create venv (first time only)
@@ -51,25 +71,9 @@ python -m venv .venv
 
 # install dependencies
 .venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
-
-# configure environment
-copy .env.example .env
-# then fill in .env with real values (DB, Qdrant, AI provider keys, etc.)
 ```
 
 Bash-tool equivalents use `.venv/Scripts/python.exe`.
-
-Run migrations once a Postgres instance is reachable via `DATABASE_URL`:
-
-```powershell
-.venv\Scripts\alembic.exe upgrade head
-```
-
-Run the dev server:
-
-```powershell
-.venv\Scripts\uvicorn.exe app.main:app --reload
-```
 
 Run checks (required before any PR, per [CONTRIBUTING.md](CONTRIBUTING.md)):
 
