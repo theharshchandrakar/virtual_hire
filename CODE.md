@@ -59,7 +59,9 @@ Present the diff (or a summary of it) and stop again. This is a second, independ
 
 ### 7. Push to remote
 
-Commit with the Jira story key in the message (e.g., `VHIRE-2: add DB session/engine setup`) so the change is traceable back to its story, then push. One story is one commit (or a small tightly-related set) — don't batch multiple unrelated stories into a single commit because they happened to land in the same sitting.
+Commit with the Jira story key in the message (e.g., `VHIRE-2: add DB session/engine setup`) so the change is traceable back to its story. One story is one commit (or a small tightly-related set) — don't batch multiple unrelated stories into a single commit because they happened to land in the same sitting.
+
+Push to a story branch (see [Branching](#branching) below, and [CONTRIBUTING.md](CONTRIBUTING.md) for the full naming convention and PR rules) and open a PR — never push directly to `main`. The two in-conversation approval gates in this workflow (steps 3 and 6) cover the *content* of the change; the PR review covers the *mergeability* of the change and is a separate, required gate.
 
 ---
 
@@ -79,7 +81,7 @@ A story isn't done at step 7 just because it pushed — it's done when all of th
 
 ## Branching
 
-Work happens directly on `main` with one commit per story, matching how this repo has operated so far — no feature-branch-per-story process unless the team decides review load requires one later. If that changes, this section is the place to update.
+Every story is built on its own branch (`<type>/<JIRA-KEY>-<short-description>`) and merged via PR — see [CONTRIBUTING.md](CONTRIBUTING.md) for the naming convention, PR requirements, and review/merge rules. Direct commits to `main` are not permitted, including for the Lead Architect.
 
 ## Environment reminders specific to this repo
 
@@ -90,4 +92,4 @@ Work happens directly on `main` with one commit per story, matching how this rep
 ## Open Questions
 
 - Should Jira transitions (To Do → In Progress → Done) be driven automatically at each workflow step, or updated manually by whoever's running the session? No Jira-GitHub integration is configured yet, so commits don't auto-transition issues — decide whether that's worth setting up once sprint velocity makes manual transitions annoying.
-- At what point (if any) does this project want a PR-based review step instead of direct-to-main commits — the two in-conversation approval gates currently serve the review function informally; revisit if the team grows beyond a single primary contributor.
+- See [CONTRIBUTING.md](CONTRIBUTING.md)'s own Open Questions for outstanding review-process decisions (sole-reviewer scaling, CI wiring).
