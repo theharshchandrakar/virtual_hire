@@ -1,0 +1,45 @@
+"""Organization management routes (VHIRE-12 / E3).
+
+Bootstrap-only in v1, per EPIC.md ("likely admin-tooling not self-serve
+signup") — deliberately **unauthenticated** for now, since Organization
+creation is the one operation that can't depend on an already-existing
+org-scoped HR user (there's no org yet to scope a JWT to). Not safe to
+expose on a public-facing deployment as-is; flagged here for the
+stub-approval discussion rather than silently assumed.
+"""
+
+import uuid
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.base import get_db
+from app.schemas.organization import OrganizationCreate, OrganizationRead
+
+router = APIRouter(prefix="/organizations", tags=["organizations"])
+
+
+@router.post("", response_model=OrganizationRead, status_code=status.HTTP_201_CREATED)
+async def create_organization(
+    body: OrganizationCreate, session: AsyncSession = Depends(get_db)
+) -> OrganizationRead:
+    """Create an Organization and provision its Qdrant collection.
+
+    Raises:
+        HTTPException: 503 if Qdrant collection provisioning fails — no
+            Organization row is created in that case (I11; see
+            `app.services.organizations.create_organization`).
+    """
+    raise NotImplementedError("VHIRE-12")
+
+
+@router.get("/{organization_id}", response_model=OrganizationRead)
+async def read_organization(
+    organization_id: uuid.UUID, session: AsyncSession = Depends(get_db)
+) -> OrganizationRead:
+    """Fetch an Organization by id.
+
+    Raises:
+        HTTPException: 404 if no Organization with this id exists.
+    """
+    raise NotImplementedError("VHIRE-12")
