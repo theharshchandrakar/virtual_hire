@@ -8,6 +8,8 @@
 
 > **Revision note (2026-07-15):** the vector store moved from pgvector-inside-Postgres to a dedicated Qdrant instance (one collection per Organization). This changes E1 (no longer owns vector schema), E3 (now provisions the Qdrant collection at org-creation time), E7 (now targets Qdrant instead of a Postgres table), E10 (queries Qdrant instead of Postgres ANN), E12 (deletion now spans two systems), E13 (the I2/I11 test suite now proves Qdrant collection isolation, not RLS-on-a-vector-table), and E14 (Qdrant added to readiness checks). See [docs/06-architecture.md](docs/06-architecture.md) for the full reasoning and [CHANGELOG.md](CHANGELOG.md) for when this changed. This mirrors the corresponding rewrite of the Jira epic/stories in the `VHIRE` project.
 
+> **Revision note (2026-07-16):** Sift's scope expanded to three parallel scored-assessment services (Resume Analyzer, Interview Live Proctoring, Interview Transcript + Assignment Reviewer), all routed through a shared deterministic Scoring Engine and a new Verdict/Judge crew agent, with **all** LLM crew model access (not just the new agent) now going through **OpenRouter** instead of direct Anthropic API calls. Seven new epics were added (**E15–E21**); **E6, E9, E10, E12, E13, E14** were revised in place. **E1 and E2 are unaffected and already implemented as of this revision** — nothing below invalidates that work; the new tables in E15 are purely additive to E1's schema. Full reasoning lives in [docs/00-ideation.md](docs/00-ideation.md) (product framing), [docs/06-architecture.md](docs/06-architecture.md) (components/flows), [docs/07-technical-stack.md](docs/07-technical-stack.md) (OpenRouter, and several deliberately-still-open vendor decisions), and [docs/08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md) (the biometric-data section, which drives E21's gating). See [CHANGELOG.md](CHANGELOG.md) for the full pivot record.
+
 ---
 
 ## Epic dependency graph
@@ -28,6 +30,13 @@ flowchart TD
     E12[E12 Privacy, Consent & Deletion]
     E13[E13 Multi-Tenancy Test Suite & Release Gating]
     E14[E14 Observability & Deployment Readiness]
+    E15[E15 Extended Data Model - Verdicts, Transcripts, Proctoring, Assignments]
+    E16[E16 Scoring Engine]
+    E17[E17 Verdict/Judge Agent & OpenRouter Gateway]
+    E18[E18 Resume Analyzer Verdict]
+    E19[E19 Transcript Ingestion & Assignment Submission API]
+    E20[E20 Transcript + Assignment Reviewer Verdict]
+    E21[E21 Interview Live Proctoring - gated on legal review]
 
     E1 --> E2
     E2 --> E3
@@ -54,22 +63,50 @@ flowchart TD
     E10 --> E13
     E1 --> E14
     E13 --> E14
+
+    E1 --> E15
+    E15 --> E16
+    E9 --> E17
+    E16 --> E17
+    E15 --> E17
+    E6 --> E18
+    E3 --> E18
+    E16 --> E18
+    E17 --> E18
+    E15 --> E19
+    E3 --> E19
+    E8 --> E19
+    E19 --> E20
+    E16 --> E20
+    E17 --> E20
+    E15 --> E21
+    E16 --> E21
+    E17 --> E21
+    E3 --> E21
+    E8 --> E21
+    E21 --> E12
+    E15 --> E12
+    E15 --> E13
+    E15 --> E14
+    E21 --> E14
 ```
 
 ## Sequencing vs. roadmap
 
 | Epics | Maps to [09-roadmap.md](docs/09-roadmap.md) phase | Notes |
 |---|---|---|
-| E1, E2 | v1a (Data model + FastAPI core) | Nothing else can start until these land. E1 is now Postgres-only. |
+| E1, E2 | v1a (Data model + FastAPI core) | Nothing else can start until these land. E1 is now Postgres-only. **Both are already implemented** as of this revision. |
 | E3, E4, E5 | v1a / v1b boundary | E3 now also provisions each Organization's Qdrant collection — this is a new dependency E7 has on E3 that didn't exist when the vector index lived inside Postgres. |
-| E6 | v1b (Ingestion + Extraction Agent parsing) | |
+| E6 | v1b (Ingestion + Extraction Agent parsing) | Model access via OpenRouter once E17 lands — see E17's note. |
 | E7 | v1e (Qdrant collection provisioning + embedding pipeline) | Depends on both E3 (collection must exist) and E6 (parsed text to embed) — previously depended only on E6. |
 | E8 | v1c (Pipeline + scorecards — backend portion only) | Can proceed in parallel with E6/E7; no data dependency between them. |
-| E9, E10 | v1f / v1g (LLM crew, RAG search) | E10 now queries Qdrant, not a Postgres ANN index. |
+| E9, E10 | v1f / v1g (LLM crew, RAG search) | E10 now queries Qdrant, not a Postgres ANN index; both route model access via OpenRouter once E17 lands. |
 | E11 | Unchanged from prior design, threaded through v1c/v1b | |
-| E12 | v1 ships list ("consent + deletion flow covering embeddings") | Now a two-system deletion (Postgres + Qdrant) — see the new cross-cutting risk below. |
-| E13 | v1d (Multi-tenancy hardening + I2/I11 test suites) | The vector-isolation half of this suite now proves Qdrant collection-per-organization isolation, not RLS on a shared table — a materially different test design, not just a relabeling. |
-| E14 | Cuts across v1a→v1g | Qdrant connectivity added to readiness checks. |
+| E12 | v1 ships list ("consent + deletion flow covering embeddings") | Now a two-system deletion (Postgres + Qdrant) — see the cross-cutting risk table below. **Extended in this revision** to cover proctoring-data retention/deletion (I13) once E21 exists. |
+| E13 | v1d (Multi-tenancy hardening + I2/I11 test suites) | The vector-isolation half of this suite now proves Qdrant collection-per-organization isolation, not RLS on a shared table. **Extended in this revision** to cover the six new tables E15 adds — same RLS mechanism, no new test *design*, just more tables. |
+| E14 | Cuts across v1a→v1g | Qdrant connectivity added to readiness checks. **Extended in this revision** for proctoring ingestion health and stuck-`proctoring_session` alerting. |
+| **E15–E20** **[New]** | v1 "Verdict Services" (see [09-roadmap.md](docs/09-roadmap.md)'s new dedicated Gantt section) | Ship as part of v1 proper, not gated the way E21 is — no new legal-category data involved. |
+| **E21** **[New]** | v1-proctoring, a **separate, legally-gated roadmap row** — not part of v1's exit criteria | The one epic in this document whose ship date for any given organization is not primarily an engineering timeline — see its Definition of Done. |
 
 ---
 
@@ -183,6 +220,8 @@ flowchart TD
 
 **Definition of done:** A submitted resume reaches `status=parsed` with populated `parsed_data` on the happy path, and reaches `status=parse_failed` (not stuck) on a forced failure.
 
+**[Revision note 2026-07-16]:** the Extraction Agent's model call now goes through **OpenRouter** rather than the Anthropic API directly, per the stack revision in [07-technical-stack.md](docs/07-technical-stack.md) — the model config layer this depends on is built in **E17**. If E6 is implemented before E17, use a direct model-ID placeholder and revisit at E17; if implemented after, use E17's config layer from the start.
+
 ---
 
 ## E7 — Vector Store Provisioning & Embedding Pipeline (Qdrant)
@@ -240,6 +279,8 @@ flowchart TD
 
 **Definition of done:** Integration test: create a draft scorecard alongside submitted ones for the same Application, trigger analysis, assert the draft's content appears nowhere in the generated output or the crew's retrieved context; regenerating overwrites in place (no history table).
 
+**[Revision note 2026-07-16]:** the Summarizer Agent's model call now goes through **OpenRouter**, same note as E6. `app/crew/crew.py`'s shared crew definition, built here, is what **E17** extends with the fourth (Verdict/Judge) agent — E9 should build `crew.py` with that extension in mind (e.g., don't hardcode an assumption of exactly three agents anywhere it'd be awkward to add a fourth).
+
 ---
 
 ## E10 — RAG Search & Match Reasoning
@@ -258,6 +299,8 @@ flowchart TD
 **Docs/invariants:** I11 (the highest-risk new surface — now enforced by Qdrant collection-per-organization, not RLS, per [04-invariants.md](docs/04-invariants.md)'s 2026-07-15 revision), RAG search sequence diagram in [06-architecture.md](docs/06-architecture.md).
 
 **Definition of done:** Seed two organizations' Qdrant collections with semantically near-identical resume content; search as Org A; assert zero Org B points are ever retrieved or reasoned over, **and** assert that a request carrying a forged/spoofed `org_id` cannot cause the search job to resolve to a different organization's collection; response contains rationale text, not a bare ranking score.
+
+**[Revision note 2026-07-16]:** the Reasoning Agent's model call now goes through **OpenRouter**, same note as E6/E9.
 
 ---
 
@@ -287,12 +330,14 @@ flowchart TD
 - Deletion endpoint/routine: anonymize `candidates.full_name/email/phone` in place, set `pii_deleted_at`, anonymize free-text scorecard fields referencing the candidate by name — all without deleting rows (preserves I9's aggregate-analytics guarantee) — this half stays a single Postgres transaction.
 - **Cross-system delete step:** after (or as part of) the Postgres transaction, delete all Qdrant points for the candidate's resumes from their organization's collection, plus the resume file in object storage. **Must include an explicit compensating-action design** (retry queue with alerting, or a reconciliation job diffing "deleted in Postgres" against "still present in Qdrant") — see the new risk called out in [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md); do not ship this as a best-effort fire-and-forget call.
 - Retention-window enforcement per the retention table in [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md), if any automatic (non-request-driven) retention expiry is in v1 scope — confirm with the product owner before building.
+- **[New 2026-07-16]** Separate two-party consent capture for interview proctoring (`proctoring_sessions.candidate_consented_at`/`interviewer_consented_at`), distinct from and in addition to resume-submission consent — see [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md)'s dedicated consent-flow section.
+- **[New 2026-07-16]** I13 enforcement: a scheduled retention job hard-deleting `proctoring_events` past its (legal-review-pending) retention window, plus extending the I9 deletion routine to hard-delete `proctoring_events`, `verdicts`, `transcripts.text`, and `assignment_submissions` files for a deleted Candidate — same "derived data, hard-delete not anonymize" treatment already applied to `analysis_outputs`/Qdrant points.
 
-**Depends on:** E3 (candidate ownership), E8, E7 (points to purge).
+**Depends on:** E3 (candidate ownership), E8, E7 (points to purge), **E15 (new tables to purge), E21 (proctoring data specifically — though the retention *job* for `proctoring_events` should ship as part of E21 itself, not wait on this epic, given I13's independent urgency)**.
 
-**Docs/invariants:** I9, [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md) deletion flow diagram and its new two-system consistency risk section.
+**Docs/invariants:** I9, **I13**, [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md) deletion flow diagram, its two-system consistency risk section, and its new "Interview proctoring — biometric data" section.
 
-**Definition of done:** Integration test: trigger deletion, assert PII fields are anonymized in Postgres and all corresponding points are gone from the org's Qdrant collection, assert aggregate requisition funnel counts are unchanged; a second test forcing the Qdrant delete call to fail confirms the compensating-action path (retry/alert/reconciliation) actually fires rather than silently leaving orphaned points.
+**Definition of done:** Integration test: trigger deletion, assert PII fields are anonymized in Postgres and all corresponding points are gone from the org's Qdrant collection, assert aggregate requisition funnel counts are unchanged; a second test forcing the Qdrant delete call to fail confirms the compensating-action path (retry/alert/reconciliation) actually fires rather than silently leaving orphaned points. **[New]** A third test: seed `proctoring_events` older than the retention window, run the scheduled retention job, assert they're purged without a deletion request; a fourth test: trigger I9 deletion, assert `proctoring_events`/`verdicts`/`transcripts`/`assignment_submissions` are all gone for that candidate.
 
 ---
 
@@ -305,12 +350,13 @@ flowchart TD
 - I2 suite: authenticated as Org A, attempt to read every Org B entity by ID across every resource type, assert 404/denied on all of them.
 - I11 suite: (a) run a vector similarity search as Org A seeded to be a near-perfect semantic match for Org B content, assert zero Org B points are returned regardless of similarity score; (b) attempt to construct a request/job with a spoofed or manipulated `org_id` and assert it cannot cause collection resolution to point at another organization's collection — this second case is new and specific to the collection-per-org design, distinct from the old "does the query filter correctly" test shape.
 - Wire this suite into CI as a required, non-skippable check gating merges to main / release builds.
+- **[New 2026-07-16]** Extend the I2 suite's resource-type coverage to the six tables E15 adds (`transcripts`, `proctoring_sessions`, `proctoring_events`, `assignments`, `assignment_submissions`, `verdicts`) — no new test *design* needed (same RLS mechanism as every other table), just extend the existing parametrized resource-type list.
 
-**Depends on:** E2, E3 (collection provisioning must exist to seed test collections), E7, E10.
+**Depends on:** E2, E3 (collection provisioning must exist to seed test collections), E7, E10, **E15 (new tables to include in the I2 sweep)**.
 
 **Docs/invariants:** I2, I11, the v1→v2 exit criteria in [09-roadmap.md](docs/09-roadmap.md).
 
-**Definition of done:** Suite runs in CI, fails the build on any cross-tenant leak in either Postgres or Qdrant, and is documented as a required check.
+**Definition of done:** Suite runs in CI, fails the build on any cross-tenant leak in either Postgres or Qdrant, and is documented as a required check. **[New]** The I2 resource-type sweep includes all six new tables, not just the original ten.
 
 ---
 
@@ -324,12 +370,137 @@ flowchart TD
 - Error tracking integration (e.g., Sentry) for both API and worker processes.
 - The monitoring alert for resumes stuck in `parsing` past a timeout threshold (I6), plus a new alert for resumes stuck in `embedding_status=embedding` past a timeout — the Qdrant-side analog that didn't exist as a distinct concern when embedding was a synchronous-feeling part of the same Postgres write path.
 - Deployment configs: separate task definitions for API, parsing worker, embedding worker, crew worker, notification worker, plus Qdrant Cloud connection/credential management as a distinct operational concern from RDS/ElastiCache.
+- **[New 2026-07-16]** `/health` readiness check extended to cover OpenRouter connectivity (a new hard external dependency for *every* crew agent, not just one). A monitoring alert for `proctoring_sessions` stuck in `analyzing` past a timeout threshold — the proctoring-side analog of the existing `parsing`/`embedding` stuck-state alerts. Separate task definitions added for the Proctoring Analysis Worker and Transcript & Assignment Reviewer Worker.
 
-**Depends on:** E1 (baseline), E13 (nothing ships to a pilot without the isolation suite green).
+**Depends on:** E1 (baseline), E13 (nothing ships to a pilot without the isolation suite green), **E15 (new tables the health/alerting checks cover), E21 (proctoring-specific alerting)**.
 
-**Docs/invariants:** I6 operational enforcement note, Hosting row in [07-technical-stack.md](docs/07-technical-stack.md).
+**Docs/invariants:** I6 operational enforcement note, Hosting row in [07-technical-stack.md](docs/07-technical-stack.md), **I13's operational retention-job monitoring**.
 
 **Definition of done:** Every process type can be started independently with its own health signal; readiness check fails loudly if Qdrant is unreachable, not just if Postgres is; a resume stuck in `parsing` or stuck in `embedding` triggers an alert; API and worker errors surface in a trackable place, not just stdout.
+
+---
+
+## E15 — Extended Data Model: Verdicts, Transcripts, Proctoring, Assignments **[New 2026-07-16]**
+
+**Goal:** Stand up the six new Postgres tables from [docs/05-data-model.md](docs/05-data-model.md)'s "Verdict-service tables" section as SQLAlchemy models with an Alembic migration — the E1-equivalent foundation for every epic below. Purely additive to E1's schema; no existing table changes.
+
+**Key deliverables:**
+- `app/models/` additions: `transcripts`, `proctoring_sessions`, `proctoring_events`, `assignments`, `assignment_submissions`, `verdicts`, plus their native Postgres enums.
+- Alembic migration: create all six tables, RLS policies on each (same pattern as E1's migration), the `applications`/`assignments` org-consistency trigger (I3 pattern extended), and the `verdicts` `resume_id`/`interview_id` exclusivity + same-org CHECK trigger described in [05-data-model.md](docs/05-data-model.md).
+- `UNIQUE (application_id, assignment_id)` on `assignment_submissions`, `UNIQUE (application_id, service_type)` on `verdicts`, `UNIQUE (interview_id)` on `transcripts`/`proctoring_sessions`.
+
+**Depends on:** E1 (extends its schema/migration chain; no other epic dependency — job_requisitions/applications/interviews/candidates/resumes already exist).
+
+**Docs/invariants:** [05-data-model.md](docs/05-data-model.md)'s Verdict-service tables section, I2 (RLS on the new tables), I12–I15 (schema-level pieces: `deterministic_score NOT NULL`, etc.).
+
+**Definition of done:** `alembic upgrade head` runs clean with all six new tables present; every constraint/trigger in the data-model doc's description exists; RLS is *on* for all six (same "not yet exercised by app code" caveat E1 carried).
+
+---
+
+## E16 — Scoring Engine **[New 2026-07-16]**
+
+**Goal:** The shared, deterministic rules framework every one of the three verdict services runs through before any model call — the concrete implementation of **I12**'s "Judge never runs without a preceding Scoring Engine result."
+
+**Key deliverables:**
+- `app/services/scoring/` — one rule module per service type (`resume_fit.py`, `proctoring_integrity.py`, `transcript_assignment.py`), each a pure function taking structured input (parsed resume + requisition, proctoring events, transcript + rubric + assignment submission respectively) and returning a structured sub-score/flag payload matching `verdicts.deterministic_score`'s JSONB shape.
+- Rule definitions are engineering-authored and versioned in code, per A23 — no config-table/no-code builder in v1 (see the open question in [06-architecture.md](docs/06-architecture.md) about where this should live, resolved here as "code").
+- No model calls anywhere in this package — fully deterministic and unit-testable without mocking an LLM, by design.
+
+**Depends on:** E15 (tables to read from/shape output against).
+
+**Docs/invariants:** I12, A23 in [02-assumptions.md](docs/02-assumptions.md), the Scoring Engine component in [06-architecture.md](docs/06-architecture.md).
+
+**Definition of done:** Each of the three rule modules has unit tests covering its scoring logic in isolation (no DB, no model); calling any rule module twice with identical input produces identical output (determinism is directly tested, not assumed).
+
+---
+
+## E17 — Verdict/Judge Agent & OpenRouter Gateway **[New 2026-07-16]**
+
+**Goal:** Two things bundled because they're the same underlying change: (1) migrate all LLM crew model access to OpenRouter, and (2) add the Verdict/Judge agent — the fourth crew role — that every verdict service calls after the Scoring Engine runs.
+
+**Key deliverables:**
+- Model configuration layer (`app/crew/models.py` or equivalent): every crew agent's model ID becomes an OpenRouter-routed identifier (`openrouter/anthropic/claude-...`) via LiteLLM's built-in provider prefix, reading `OPENROUTER_API_KEY` from settings. This is the layer E6/E9/E10's agents (whichever land first) point at.
+- `app/crew/agents/judge.py` — the Verdict/Judge agent, bound to the 200–300B-class model named in [07-technical-stack.md](docs/07-technical-stack.md) once that open question is resolved.
+- Extend `app/crew/crew.py` (built in E9) with the Judge agent as a fourth role, callable from any of the three verdict-generation entry points (E18/E20/E21).
+- The Judge agent's task signature always requires a `deterministic_score` argument (the Scoring Engine's output) — no code path exists to invoke it without one, the concrete enforcement point for **I12**.
+- `crew_run` JSONB provenance recording extended to include which OpenRouter model ID served the Judge role, same convention as the existing three roles.
+
+**Depends on:** E9 (crew scaffolding to extend), E16 (Scoring Engine output shape must be defined for the Judge's input contract), E15 (`verdicts` table to write to).
+
+**Docs/invariants:** I12, the OpenRouter revision note in [07-technical-stack.md](docs/07-technical-stack.md) and [06-architecture.md](docs/06-architecture.md).
+
+**Definition of done:** A test double proves the Judge agent cannot be invoked without a preceding scoring-engine-shaped argument (I12, enforced at the function-signature/contract level, not just by convention); all four crew roles (Extraction, Summarizer, Reasoning, Judge) resolve their model via the OpenRouter config layer, confirmed by inspecting the actual model ID each call is made with in a test.
+
+---
+
+## E18 — Resume Analyzer Verdict **[New 2026-07-16]**
+
+**Goal:** The first of the three verdict services: score a parsed resume against its requisition's requirements and produce a `pass`/`review`/`fail` verdict with narrative.
+
+**Key deliverables:**
+- `generate_resume_verdict` Celery task: read `Resume.parsed_data` + `JobRequisition` (title, department, any structured requirements) → Scoring Engine (`resume_fit` rules) → Judge agent call → write `verdicts` (`service_type=resume_analysis`).
+- `GET` endpoint to fetch (and lazily trigger regeneration of) an Application's Resume Analyzer verdict, mirroring E9's summary-fetch endpoint pattern.
+- Staleness handling: flip `verdicts.stale = true` if the Resume is re-parsed after `generated_at` (mirrors `analysis_outputs`' staleness pattern).
+
+**Depends on:** E6 (parsed resume data), E3 (requisition data), E16, E17.
+
+**Docs/invariants:** I12, the Resume Analyzer row in [00-ideation.md](docs/00-ideation.md), `verdicts` table in [05-data-model.md](docs/05-data-model.md).
+
+**Definition of done:** A parsed Resume with a linked requisition produces a `verdicts` row with a populated `deterministic_score` and narrative; the endpoint returns `pass`/`review`/`fail` plus narrative, never a bare numeric score in the response shape.
+
+---
+
+## E19 — Transcript Ingestion & Assignment Submission API **[New 2026-07-16]**
+
+**Goal:** The synchronous/ingestion half of the Transcript + Assignment Reviewer service: get a transcript into Postgres, and let candidates submit assignments.
+
+**Key deliverables:**
+- `ingest_transcript` Celery task: triggered by a video-platform webhook/poll (platform-provided transcript) or, absent one, an STT step per A27 (exact STT vendor TBD, see [07-technical-stack.md](docs/07-technical-stack.md)) → write `transcripts` (`status=available`).
+- `POST` assignment-submission endpoint (candidate-facing, magic-link authenticated per E2's candidate auth path): file/text/URL intake per A26 (no code execution), row creation in `assignment_submissions`.
+- `Assignment` CRUD (HR-facing, per requisition): `draft → published → archived` lifecycle.
+
+**Depends on:** E15, E3 (requisitions to attach Assignments to), E8 (Interviews to attach Transcripts to).
+
+**Docs/invariants:** A26, A27, `transcripts`/`assignments`/`assignment_submissions` tables in [05-data-model.md](docs/05-data-model.md).
+
+**Definition of done:** A completed Interview with a platform-provided transcript reaches `transcripts.status=available` without manual entry; a candidate can submit an assignment via magic link and the row is correctly linked to their Application.
+
+---
+
+## E20 — Transcript + Assignment Reviewer Verdict **[New 2026-07-16]**
+
+**Goal:** The second verdict service: score a transcript (and any assignment submission) against a competency rubric.
+
+**Key deliverables:**
+- `generate_transcript_verdict` Celery task: gated on `Interview.status = completed` (**I14** — reject and write no `verdicts` row otherwise) → read `transcripts.text` + `assignment_submissions` (if any) + the Assignment's `rubric` → Scoring Engine (`transcript_assignment` rules) → Judge agent call → write `verdicts` (`service_type=transcript_assignment_review`).
+- `GET` endpoint mirroring E18's pattern.
+- Staleness handling: flip `stale=true` if a new Scorecard is submitted for the same Application after `generated_at` (same trigger condition I10 already uses for `analysis_outputs`).
+
+**Depends on:** E19 (transcript/assignment data), E16, E17.
+
+**Docs/invariants:** I14, `verdicts` table in [05-data-model.md](docs/05-data-model.md).
+
+**Definition of done:** Integration test: attempt verdict generation against a `scheduled`/`cancelled`/`no_show` Interview, assert rejection with no `verdicts` row written (I14); against a `completed` Interview, assert a verdict is produced.
+
+---
+
+## E21 — Interview Live Proctoring **[New 2026-07-16 — gated on legal review, see below]**
+
+**Goal:** The third verdict service, and the one this document's own [09-roadmap.md](docs/09-roadmap.md) sequences separately from the rest of v1: ingest signal from an external video platform for a completed interview, run biometric integrity detection, and produce a proctoring verdict — never in real time, never intervening in the live call (**I15**).
+
+**Key deliverables:**
+- Proctoring Ingestion Service: webhook/bot receiver for the external video platform (Zoom/Meet/Teams — exact platform TBD, see [07-technical-stack.md](docs/07-technical-stack.md)); creates/updates `proctoring_sessions`. **Must verify inbound webhook signatures** — an unverified webhook is a real spoofing surface, per the open question in [06-architecture.md](docs/06-architecture.md).
+- Two-party consent enforcement: no `proctoring_events` row can be written unless both `candidate_consented_at` and `interviewer_consented_at` are set on the owning `proctoring_session` — enforced at the data-access layer, not just the API layer.
+- Proctoring Analysis Worker: post-interview only, pulls the recording/signal reference, calls the (TBD) proctoring signal vendor, writes `proctoring_events`.
+- `generate_proctoring_verdict` Celery task: Scoring Engine (`proctoring_integrity` rules) → Judge agent call → write `verdicts` (`service_type=interview_proctoring`).
+- I13 retention job: scheduled hard-delete of `proctoring_events` past the (legal-review-pending) retention window — ships with this epic, not deferred to E12, given I13's independent urgency.
+- Architectural guarantee for I15: no code path from any component in this epic back into a live interview session (no session-control API calls, no participant-management capability) — verified by code review, not just by omission.
+
+**Depends on:** E15, E16, E17, E3, E8. **Also gated on a precondition outside engineering's control:** per [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md) and [09-roadmap.md](docs/09-roadmap.md), this epic's *code* can be built in parallel with the rest of v1, but **must not be enabled for any real organization/jurisdiction until that jurisdiction's biometric-data and all-party-consent legal review clears** — see the roadmap's dedicated "v1-proctoring" row.
+
+**Docs/invariants:** I13, I15, A21, A22, A28, the entire "Interview proctoring — biometric data" section in [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md).
+
+**Definition of done:** Engineering DoD (can be met before legal clearance): consent gating verified by integration test (no ingestion without both consents); I15 verified by architectural review confirming no live-session callback path exists anywhere in this epic's code; a completed interview with both consents produces `proctoring_events` and a `verdicts` row; the I13 retention job purges events past the (placeholder, pending-legal) retention window in a test. **Launch DoD (separate from engineering DoD, per-organization/jurisdiction):** legal sign-off obtained per [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md), named proctoring vendor under a signed DPA — neither of which engineering can satisfy by writing code, and this epic is not "done" for a given organization until both are true for that organization's jurisdiction(s).
 
 ---
 
@@ -344,3 +515,7 @@ flowchart TD
 | **New:** deletion (I9) now spans two systems with no shared transaction — a partial failure leaves either orphaned searchable PII in Qdrant or an unreconciled anonymization in Postgres. | [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md) | E12 must ship a compensating-action mechanism (retry/alert or reconciliation job), not a bare best-effort call — treat this as part of E12's definition of done, not a follow-up. |
 | **New:** Qdrant collection-per-organization is a deliberate reversal of the prior "avoid a second tenant-isolation surface" decision, accepted for performance/scaling reasons. | [06-architecture.md](docs/06-architecture.md) | E13's test suite is the concrete proof this tradeoff is safe in practice — do not treat it as a lower-priority test class than the original Postgres RLS suite just because it's newer. |
 | **New:** Organization creation/deactivation now has a distributed-provisioning step (Postgres row + Qdrant collection) with its own partial-failure mode. | [06-architecture.md](docs/06-architecture.md) open questions | E3 needs an explicit answer to "what happens if Qdrant collection provisioning fails after the Postgres org row commits" before this is built, not improvised during implementation. |
+| **New 2026-07-16:** interview proctoring (E21) is gated on a legal review with an unknown, likely multi-month timeline entirely outside engineering's control. | [08-privacy-and-compliance.md](docs/08-privacy-and-compliance.md), [09-roadmap.md](docs/09-roadmap.md) | E21's code can and should be built in parallel with the rest of v1 (its dependencies — E15–E17, E3, E8 — are all v1-track epics), but no sprint plan should treat E21 as "done" in the sense of shippable-to-a-real-org until legal sign-off exists for that org's jurisdiction. Don't let engineering velocity on E21 create pressure to launch ahead of that review. |
+| **New 2026-07-16:** OpenRouter (E17) is now a single point of failure in front of every crew model call across all four agent roles and all three verdict services — more concentrated risk than the pre-existing "no fallback LLM provider" risk above, not a mitigation of it. | [07-technical-stack.md](docs/07-technical-stack.md) | E17 should include basic circuit-breaking/error-surfacing for OpenRouter outages from day one, given how much now depends on it; treat this as a slightly elevated version of the existing no-fallback-provider risk, not a new independent one. |
+| **New 2026-07-16:** three vendor selections are still open (Verdict/Judge model, video platform, proctoring signal detection vendor) and each blocks a different epic (E17, E19/E21, E21 respectively) from being fully implementable. | [07-technical-stack.md](docs/07-technical-stack.md) open questions | E16 (Scoring Engine) and E15 (schema) can and should proceed without these decisions, since they're vendor-agnostic; E17/E19/E21's actual integration code cannot be finished until each respective vendor is named — sequence planning should treat these as external blockers to flag early, not discover mid-sprint. |
+| **New 2026-07-16:** the Scoring Engine's rubrics (E16) directly influence a verdict that could factor into hiring decisions, raising the same disparate-impact concern the autonomous-ranking exclusion in [01-problem-space-and-scope.md](docs/01-problem-space-and-scope.md) was written to avoid — but the rubrics themselves aren't currently in either the legal-review scope (E21) or the general privacy review pending elsewhere. | [02-assumptions.md](docs/02-assumptions.md), [09-roadmap.md](docs/09-roadmap.md) open questions | Confirm with the product owner whether E16/E18/E20's rubrics need their own disparate-impact review before pilot launch, distinct from and in addition to E21's biometric-specific legal gate — currently unresolved, not just for proctoring. |

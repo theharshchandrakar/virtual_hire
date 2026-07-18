@@ -178,6 +178,103 @@ The cached result of the LLM crew running over an Application — a derived arti
 
 Append-only by convention (no UPDATE/DELETE grants at the DB role level) — this table is itself the enforcement mechanism for I4's audit trail requirement.
 
+## Verdict-service tables **[New 2026-07-16]**
+
+Support the three scored-assessment services in [00-ideation.md](00-ideation.md). All are `organization_id`-scoped Postgres tables covered by RLS (I2), same as every table above — no new isolation mechanism, just more tables under the existing one.
+
+### transcripts
+| Field | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| organization_id | UUID | NOT NULL, FK → organizations |
+| interview_id | UUID | NOT NULL, UNIQUE, FK → interviews |
+| status | ENUM(pending, available, unavailable) | NOT NULL, DEFAULT 'pending' |
+| source | ENUM(platform_provided, generated_stt) | nullable — set once `status = available` |
+| text | TEXT | nullable — populated once ingested |
+| language | TEXT | nullable |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL |
+
+### proctoring_sessions
+| Field | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| organization_id | UUID | NOT NULL, FK → organizations |
+| interview_id | UUID | NOT NULL, UNIQUE, FK → interviews |
+| platform | ENUM(zoom, google_meet, teams, other) | NOT NULL |
+| external_meeting_ref | TEXT | nullable — the video platform's own meeting/recording identifier; never the raw media itself (see "not first-class" note in [03-ontology.md](03-ontology.md)) |
+| candidate_consented_at | TIMESTAMPTZ | nullable — **enforces the candidate half of A22's consent gate**; ingestion may not begin until set |
+| interviewer_consented_at | TIMESTAMPTZ | nullable — the interviewer/HR-user half of the same gate |
+| status | ENUM(not_configured, consent_pending, active, analyzing, completed, failed) | NOT NULL, DEFAULT 'not_configured' |
+| failure_reason | TEXT | nullable |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL |
+
+*Application-layer enforcement: signal ingestion (creating any `proctoring_events` row) is rejected unless both `candidate_consented_at` and `interviewer_consented_at` are set — the concrete enforcement point for A22.*
+
+### proctoring_events
+| Field | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| organization_id | UUID | NOT NULL, FK → organizations |
+| proctoring_session_id | UUID | NOT NULL, FK → proctoring_sessions |
+| event_type | ENUM(multiple_faces_detected, face_not_detected, gaze_away, voice_mismatch, background_voice_detected, other) | NOT NULL |
+| severity | ENUM(info, warning, critical) | NOT NULL |
+| detected_at | TIMESTAMPTZ | NOT NULL — timestamp within the interview the signal occurred |
+| confidence | FLOAT | nullable — detection-vendor confidence score, where available |
+| metadata | JSONB | NOT NULL, DEFAULT '{}' — vendor-specific detail |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+No `updated_at` — append-only by the same convention as `audit_log` (no UPDATE/DELETE exposed anywhere in the API); this is the highest-volume table in the schema and the most sensitive data class I2 protects, per its 2026-07-16 revision note in [04-invariants.md](04-invariants.md). Subject to the shorter retention window in [08-privacy-and-compliance.md](08-privacy-and-compliance.md) (**I13**) — "append-only" governs mutation, not retention; the retention job deletes rows outright once their window expires.
+
+### assignments
+| Field | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| organization_id | UUID | NOT NULL, FK → organizations |
+| job_requisition_id | UUID | NOT NULL, FK → job_requisitions |
+| title | TEXT | NOT NULL |
+| instructions | TEXT | NOT NULL |
+| rubric | JSONB | NOT NULL — competency criteria the Scoring Engine and Verdict/Judge agent score submissions against |
+| status | ENUM(draft, published, archived) | NOT NULL, DEFAULT 'draft' |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL |
+
+### assignment_submissions
+| Field | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| organization_id | UUID | NOT NULL, FK → organizations |
+| application_id | UUID | NOT NULL, FK → applications |
+| assignment_id | UUID | NOT NULL, FK → assignments |
+| submission_object_key | TEXT | nullable — file in object storage, namespaced like `resumes.file_object_key` |
+| submission_url | TEXT | nullable — e.g. a repository link, per A26 (no code execution) |
+| status | ENUM(submitted, reviewed) | NOT NULL, DEFAULT 'submitted' |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL |
+
+Constraints:
+- `UNIQUE (application_id, assignment_id)` — at most one active submission per pair in v1; resubmission behavior (overwrite vs. new row) is an open question carried from [03-ontology.md](03-ontology.md).
+- CHECK constraint (trigger, cross-table, same I3 pattern as `applications`) verifying `applications.organization_id = assignments.organization_id` via the shared `job_requisition_id` lineage.
+
+### verdicts
+| Field | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| organization_id | UUID | NOT NULL, FK → organizations |
+| application_id | UUID | NOT NULL, FK → applications |
+| service_type | ENUM(resume_analysis, interview_proctoring, transcript_assignment_review) | NOT NULL |
+| resume_id | UUID | nullable, FK → resumes — set iff `service_type = resume_analysis` |
+| interview_id | UUID | nullable, FK → interviews — set iff `service_type IN (interview_proctoring, transcript_assignment_review)` |
+| deterministic_score | JSONB | NOT NULL — the Scoring Engine's structured sub-scores/flags; **must be written before this row's `narrative` is populated (enforces I12)** |
+| verdict_label | ENUM(pass, review, fail) | NOT NULL |
+| narrative | TEXT | NOT NULL — the Verdict/Judge agent's explanation |
+| crew_run | JSONB | NOT NULL — model provenance, same convention as `analysis_outputs.crew_run` |
+| generated_at | TIMESTAMPTZ | NOT NULL |
+| stale | BOOLEAN | NOT NULL, DEFAULT false — flipped true when an input the verdict depended on changes after `generated_at` (e.g., a new Scorecard, a resubmitted Assignment) |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL |
+
+Constraints:
+- `UNIQUE (application_id, service_type)` — at most one *current* Verdict per Application per service, per the ontology's "up to three Verdicts, never a blended one" design.
+- CHECK constraint (trigger) enforcing the `resume_id`/`interview_id` exclusivity rule above, and that whichever is set belongs to the same `organization_id` and, transitively, the same `application_id` — the I3 pattern extended to this table.
+- CHECK constraint on `verdict_label` restricting it to the fixed 3-tier vocabulary — deliberately not a numeric score, matching the "narrative over bare number" posture stated in [00-ideation.md](00-ideation.md).
+
 ## Schema-level ER diagram
 
 ```mermaid
@@ -202,6 +299,14 @@ erDiagram
 
     resumes ||--o{ QDRANT_COLLECTION : "chunks referenced by resume_id (not an FK)"
     applications ||--o| analysis_outputs : "application_id (unique)"
+
+    interviews ||--o| transcripts : "interview_id (unique)"
+    interviews ||--o| proctoring_sessions : "interview_id (unique)"
+    proctoring_sessions ||--o{ proctoring_events : "proctoring_session_id"
+    job_requisitions ||--o{ assignments : "job_requisition_id"
+    assignments ||--o{ assignment_submissions : "assignment_id"
+    applications ||--o{ assignment_submissions : "application_id"
+    applications ||--o{ verdicts : "application_id (up to 3, one per service_type)"
 
     organizations {
         uuid id PK
@@ -284,6 +389,59 @@ erDiagram
         uuid actor_hr_user_id FK
         jsonb diff
     }
+    transcripts {
+        uuid id PK
+        uuid interview_id FK
+        enum status
+        enum source
+        text text
+    }
+    proctoring_sessions {
+        uuid id PK
+        uuid interview_id FK
+        enum platform
+        text external_meeting_ref
+        timestamptz candidate_consented_at
+        timestamptz interviewer_consented_at
+        enum status
+    }
+    proctoring_events {
+        uuid id PK
+        uuid proctoring_session_id FK
+        enum event_type
+        enum severity
+        timestamptz detected_at
+        float confidence
+        jsonb metadata
+    }
+    assignments {
+        uuid id PK
+        uuid job_requisition_id FK
+        text title
+        text instructions
+        jsonb rubric
+        enum status
+    }
+    assignment_submissions {
+        uuid id PK
+        uuid application_id FK
+        uuid assignment_id FK
+        text submission_object_key
+        text submission_url
+        enum status
+    }
+    verdicts {
+        uuid id PK
+        uuid application_id FK
+        enum service_type
+        uuid resume_id FK
+        uuid interview_id FK
+        jsonb deterministic_score
+        enum verdict_label
+        text narrative
+        jsonb crew_run
+        boolean stale
+    }
 ```
 
 ## Invariant enforcement summary
@@ -301,6 +459,10 @@ erDiagram
 | I9 (deletion preserves aggregates) | Anonymization overwrites fields in place, no row deletion | Deletion routine orchestrates the Postgres overwrite + the Qdrant point deletion |
 | I10 (AnalysisOutput reflects only submitted Scorecards) | `source_scorecard_ids` column makes the input set auditable after the fact | Crew's data-fetch step filters to `status = 'submitted'` before generation |
 | I11 (RAG search never crosses org boundary) | No RLS available in Qdrant (not Postgres) — enforced by collection-per-organization physical separation, plus a redundant `organization_id` payload filter on every query | Data-access layer resolves the org's collection name from session context, never from client input; payload filter applied as belt-and-suspenders |
+| I12 (Verdict never generated without a Scoring Engine result) | `verdicts.deterministic_score` is `NOT NULL` — a row cannot exist without it | Generation pipeline always runs the Scoring Engine before the Judge agent; no code path calls the Judge without it |
+| I13 (proctoring data retention) | — | Scheduled retention job + I9 deletion routine both purge `proctoring_events` past the (legal-review-pending) retention window |
+| I14 (Transcript/Assignment Verdict only after Interview completed) | — | Generation pipeline checks `Interview.status = completed` before running |
+| I15 (proctoring never intervenes live) | — (no DB mechanism applies to an architectural non-existence guarantee) | No API/code path from the proctoring ingestion pipeline back into a live interview session — architecture-level, verified by code review |
 
 ## Open Questions
 
@@ -311,3 +473,7 @@ erDiagram
 - Should the embedding vector dimension (1024, tied to `voyage-3`) be treated as a schema/collection-config migration risk — swapping embedding models later requires provisioning new collections and re-embedding every point, this time across every organization's collection rather than a single shared table.
 - **New in this revision:** Qdrant collection provisioning/teardown is now coupled to Organization lifecycle (create → provision, deactivate/delete → teardown). What happens to an Organization's collection during a `suspended` state — paused/read-only, or untouched until `deactivated`? This needs a decision before E3's org lifecycle work is implemented.
 - **New in this revision:** deletion (I9) now spans two systems (Postgres anonymization + Qdrant point deletion) instead of one transactional DB. What is the compensating action if the Qdrant delete call fails after the Postgres transaction commits (or vice versa) — retry queue, reconciliation job, or treat as a monitored/alerted exception path? See [08-privacy-and-compliance.md](08-privacy-and-compliance.md).
+- **New 2026-07-16:** should `proctoring_events` be partitioned (e.g., by month, or by organization) from day one given it's the highest-write-volume table in the schema and subject to a short, hard retention deadline (I13) — unlike `audit_log`'s "defer partitioning to v2" answer above, a short retention window makes partition-based bulk deletion (drop old partitions) meaningfully more attractive than row-by-row deletes here.
+- **New 2026-07-16:** is `verdicts.deterministic_score`'s JSONB shape stable enough across all three `service_type` values to be queried/reported on meaningfully (e.g., "average resume-fit sub-score across all Applications for a requisition"), or does each service_type need its own typed sub-score columns once reporting requirements are known?
+- **New 2026-07-16:** should `assignment_submissions` support multiple rows per (Application, Assignment) instead of the `UNIQUE` constraint above, to preserve resubmission history the way Scorecard amendments preserve the original — currently unresolved, carried from the same open question in [03-ontology.md](03-ontology.md).
+- **New 2026-07-16:** the CHECK constraint on `verdicts` enforcing `resume_id`/`interview_id` exclusivity by `service_type` needs its exact trigger logic designed during implementation (E15) — this doc states the rule, not the SQL, deliberately, since it depends on how E15 structures the migration.
