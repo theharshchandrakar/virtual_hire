@@ -1,0 +1,18 @@
+Jordan Rivera
+Senior Backend Engineer
+
+WORK HISTORY
+Senior Backend Engineer, Northwind Logistics (2021 - Present)
+  - Designed and operated Django/Python services handling order routing for a national logistics network.
+  - Migrated the primary datastore to PostgreSQL, cutting query latency by 40%.
+  - Led the team's move to Kubernetes on AWS EKS, standardizing deployment across 12 microservices.
+
+Backend Engineer, Fenwick Analytics (2018 - 2021)
+  - Built REST APIs in Python (Flask, then Django) serving internal analytics dashboards.
+  - Operated production workloads on AWS (EC2, RDS, S3).
+
+EDUCATION
+B.S. Computer Science, State University (2014 - 2018)
+
+SKILLS
+Python, Django, PostgreSQL, Kubernetes, AWS, Docker, REST APIs, System Design

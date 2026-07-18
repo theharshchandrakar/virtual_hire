@@ -1,0 +1,21 @@
+Interviewer: Can you walk me through a challenging system design problem you solved recently?
+
+Candidate: Sure. At my last role, we had a service that was falling over under load during peak
+traffic. I started by profiling the request path and found that a synchronous call to a third-party
+API was blocking the entire request pipeline. I proposed moving that call to an async queue with a
+worker pool, which meant the primary request path could return quickly with a "processing" status and
+poll or webhook back when the third-party call completed. We used Celery with Redis as the broker,
+similar to a pattern I've used elsewhere.
+
+Interviewer: How did you handle failures in that async path?
+
+Candidate: We added retry with exponential backoff, a dead-letter queue for anything that failed
+after the max retry count, and an alert that fired if the dead-letter queue grew past a threshold.
+We also made sure the operation was idempotent so retries were safe - we used the resource's own ID
+plus an operation type as an idempotency key.
+
+Interviewer: What would you do differently if you were starting over?
+
+Candidate: I'd probably introduce the async boundary earlier, before it became an emergency. I'd also
+push for better observability from day one - we ended up building most of our tracing after the fact,
+which made the initial debugging much slower than it needed to be.

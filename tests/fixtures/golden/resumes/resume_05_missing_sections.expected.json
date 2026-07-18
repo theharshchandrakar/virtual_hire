@@ -1,0 +1,18 @@
+{
+  "slug": "resume_05_missing_sections",
+  "candidate_name": "Morgan Blake",
+  "expected_parsed_data": {
+    "work_history_min_count": 0,
+    "education_min_count": 0,
+    "skills": ["python", "aws", "kubernetes", "postgresql", "django"]
+  },
+  "requisition_matches": {
+    "req_backend_engineer": {
+      "expected_verdict_label_band": ["pass", "review"],
+      "expected_min_matched_skills": 3
+    }
+  },
+  "notes": "Prose-only resume with no explicit 'SKILLS' section header - exercises the Extraction Agent's ability to infer skills from narrative text (a live-LLM-tier concern, not testable by the structural seeding pipeline alone).",
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

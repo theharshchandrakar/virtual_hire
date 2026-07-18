@@ -1,0 +1,10 @@
+{
+  "slug": "transcript_01_strong",
+  "expected_scoring": {
+    "min_word_count": 200,
+    "meets_minimum_length": true,
+    "expected_flags": []
+  },
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

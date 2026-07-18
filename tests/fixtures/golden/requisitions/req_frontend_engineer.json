@@ -1,0 +1,11 @@
+{
+  "slug": "req_frontend_engineer",
+  "title": "Frontend Engineer",
+  "department": "Engineering",
+  "scorecard_template": {
+    "required_skills": ["javascript", "react", "typescript", "css", "html"],
+    "fields": ["technical_depth", "ui_craft", "communication"]
+  },
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

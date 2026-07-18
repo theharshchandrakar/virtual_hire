@@ -1,0 +1,18 @@
+{
+  "slug": "resume_03_sparse",
+  "candidate_name": "Sam Ortiz",
+  "expected_parsed_data": {
+    "work_history_min_count": 0,
+    "education_min_count": 0,
+    "skills": ["python", "sql"]
+  },
+  "requisition_matches": {
+    "req_backend_engineer": {
+      "expected_verdict_label_band": ["review", "fail"],
+      "expected_min_matched_skills": 0
+    }
+  },
+  "notes": "Deliberately sparse/unstructured resume - exercises the no_work_history_extracted / no_skills_extracted flags in resume_fit scoring when an extraction produces little structure.",
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

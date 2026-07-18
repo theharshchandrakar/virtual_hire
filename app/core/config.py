@@ -58,13 +58,15 @@ class Settings(BaseSettings):
 
     # LLM crew gateway (VHIRE-2x / E6-E17) - all crew model access routes through
     # OpenRouter per the 2026-07-16 docs pivot; model IDs use LiteLLM's
-    # `openrouter/` prefix. judge_model is a swappable default (DeepSeek-V3, a
-    # 200-300B-class model), not a final vendor decision - see vector.md.
+    # `openrouter/` prefix. judge_model is a swappable default (DeepSeek V4
+    # Flash: 284B total / 13B active parameters, verified against OpenRouter's
+    # live catalog - the closest literal fit to the "200-300B-parameter class"
+    # spec), not a final vendor decision - see vector.md.
     openrouter_api_key: str = ""
     extraction_model: str = "openrouter/anthropic/claude-haiku-4.5"
     summarization_model: str = "openrouter/anthropic/claude-sonnet-5"
     reasoning_model: str = "openrouter/anthropic/claude-opus-4.8"
-    judge_model: str = "openrouter/deepseek/deepseek-chat"
+    judge_model: str = "openrouter/deepseek/deepseek-v4-flash"
 
     # Speech-to-text fallback for interview audio recordings without a
     # platform-provided transcript (VHIRE-2x / E7 transcript pipeline).

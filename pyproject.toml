@@ -2,6 +2,13 @@
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+# live_llm tests make real OpenRouter/Voyage/Qdrant calls (TESTING.md §7.9) -
+# excluded from the default run; CI's dedicated live-RAG job runs them via
+# `pytest -m live_llm tests/live` once OPENROUTER_API_KEY/VOYAGE_API_KEY are set.
+addopts = "-m \"not live_llm\""
+markers = [
+    "live_llm: makes real OpenRouter/Voyage/Qdrant calls - opt in via `pytest -m live_llm`",
+]
 
 [tool.ruff]
 line-length = 120

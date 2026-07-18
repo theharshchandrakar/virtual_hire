@@ -1,0 +1,11 @@
+{
+  "slug": "transcript_02_short",
+  "expected_scoring": {
+    "min_word_count": 200,
+    "meets_minimum_length": false,
+    "expected_flags": ["transcript_below_minimum_length"]
+  },
+  "notes": "Deliberately short transcript - exercises transcript_review's below-minimum-length flag.",
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

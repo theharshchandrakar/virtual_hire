@@ -1,0 +1,16 @@
+Priya Nair
+Frontend Engineer
+
+WORK HISTORY
+Frontend Engineer, Brightloop Media (2020 - Present)
+  - Built React/TypeScript single-page applications for a media streaming product.
+  - Owned the design system and component library used across 5 product teams.
+
+UI Engineer, Studio Kestrel (2017 - 2020)
+  - Developed responsive web interfaces using JavaScript, HTML, and CSS.
+
+EDUCATION
+B.A. Design, Coastal Arts College (2013 - 2017)
+
+SKILLS
+JavaScript, React, TypeScript, CSS, HTML, Figma, Accessibility

@@ -1,0 +1,20 @@
+Interviewer: Let's talk about database performance. How would you diagnose a slow query in Postgres?
+
+Candidate: I'd start with EXPLAIN ANALYZE to see the actual query plan and where time is being spent -
+whether it's a sequential scan that should be using an index, a nested loop join that's blowing up on
+row estimates, or I/O-bound work. From there I'd check pg_stat_statements to see if this query is a
+one-off or a recurring hot path worth optimizing structurally, versus something that just needs a
+targeted index.
+
+Interviewer: Suppose adding an index doesn't help. What else would you look at?
+
+Candidate: I'd look at whether the table needs partitioning if it's grown very large, whether
+autovacuum is keeping up (bloat can silently degrade performance over time), and whether the query
+itself can be restructured - sometimes breaking one complex query into two simpler ones with an
+application-level join is faster than a single query the planner struggles with.
+
+Interviewer: How do you think about read replicas in this context?
+
+Candidate: Read replicas help horizontally scale read load away from the primary, but they don't fix
+a fundamentally slow query - they just spread the same slow query across more machines. I'd treat
+replica scaling and query optimization as separate levers, not substitutes for each other.

@@ -1,0 +1,5 @@
+Morgan Blake
+
+I've spent the last several years building backend systems, mostly in Python, and running them on
+AWS with Kubernetes and PostgreSQL underneath. Before that I worked on a small team shipping a
+Django-based product end to end. I care a lot about clean API design and reliability.

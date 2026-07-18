@@ -1,0 +1,21 @@
+{
+  "slug": "resume_01_strong_backend_match",
+  "candidate_name": "Jordan Rivera",
+  "expected_parsed_data": {
+    "work_history_min_count": 2,
+    "education_min_count": 1,
+    "skills": ["python", "django", "postgresql", "kubernetes", "aws", "docker"]
+  },
+  "requisition_matches": {
+    "req_backend_engineer": {
+      "expected_verdict_label_band": ["pass", "review"],
+      "expected_min_matched_skills": 4
+    },
+    "req_frontend_engineer": {
+      "expected_verdict_label_band": ["review", "fail"],
+      "expected_min_matched_skills": 0
+    }
+  },
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

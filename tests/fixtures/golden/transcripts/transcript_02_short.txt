@@ -1,0 +1,5 @@
+Interviewer: Tell me about a project you're proud of.
+
+Candidate: I built a small internal tool for our team. It went well.
+
+Interviewer: Thanks, that's all we have time for today.

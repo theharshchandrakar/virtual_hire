@@ -106,10 +106,12 @@ Both are documented as **defaults picked to have working code, not final vendor 
 
 | | Default chosen | Config | Why swappable |
 |---|---|---|---|
-| Verdict/Judge model | `openrouter/deepseek/deepseek-chat` (DeepSeek-V3, fits the "200–300B-parameter class" the product brief specifies) | `JUDGE_MODEL` env var, read by `app.crew.models.model_for_role("judge")` | OpenRouter routes model access through one gateway specifically so this is a config change, not a code change (per the 07-technical-stack.md OpenRouter revision) |
+| Verdict/Judge model | `openrouter/deepseek/deepseek-v4-flash` (DeepSeek V4 Flash — 284B total / 13B active parameters, verified against OpenRouter's live catalog; the closest literal fit to the "200–300B-parameter class" the product brief specifies) | `JUDGE_MODEL` env var, read by `app.crew.models.model_for_role("judge")` | OpenRouter routes model access through one gateway specifically so this is a config change, not a code change (per the 07-technical-stack.md OpenRouter revision) |
 | Speech-to-text (audio → text) | OpenAI Whisper (`whisper-1`) | `STT_MODEL` / `OPENAI_API_KEY`, read by `app.services.transcription` | The only STT integration point in the codebase — swapping vendors means rewriting `transcribe_audio`'s body, but nothing else changes (`ingest_transcript_audio` and everything downstream is vendor-agnostic) |
 
 All four crew roles (extraction, summarization, reasoning, judge) resolve their OpenRouter model ID through `app.crew.models.model_for_role`, reading `EXTRACTION_MODEL`/`SUMMARIZATION_MODEL`/`REASONING_MODEL`/`JUDGE_MODEL` — a model swap for any role is an env var change. Note: summarization/reasoning models are configured but this session did not build the Summarizer or Reasoning agents themselves (E9/E10) — only Extraction and Judge exist as of this pivot.
+
+**Real-vendor validation runs in CI, not just mocks.** `tests/live/test_golden_rag_live.py` makes genuine Voyage + Qdrant + OpenRouter (Judge) calls against `tests/fixtures/golden/`'s hand-verified resumes/transcripts, gated on `OPENROUTER_API_KEY`/`VOYAGE_API_KEY` being configured as repository secrets (skips cleanly, not a failure, if they aren't). See [TESTING.md](TESTING.md)'s §7.9 for the full design and §8 for the golden dataset.
 
 ## 7. Multi-tenancy isolation (I2 / I11)
 

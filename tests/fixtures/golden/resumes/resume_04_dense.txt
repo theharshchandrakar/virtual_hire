@@ -1,0 +1,26 @@
+Alex Chen
+Staff Software Engineer
+
+WORK HISTORY
+Staff Software Engineer, Meridian Cloud (2022 - Present)
+  - Architected a multi-region Kubernetes platform on AWS serving 200+ internal services.
+  - Drove adoption of Python/Django and Go across the platform team.
+  - Mentored 6 engineers; ran the org's system design review process.
+
+Senior Software Engineer, Halcyon Data (2019 - 2022)
+  - Built data pipelines in Python, orchestrated via Airflow, backed by PostgreSQL and S3.
+  - Led migration from on-prem to AWS.
+
+Software Engineer, Vantage Systems (2016 - 2019)
+  - Developed backend services in Python and Java for a fintech payments platform.
+  - Implemented PostgreSQL schema and query optimization for high-throughput transaction processing.
+
+Junior Developer, Openfield Software (2014 - 2016)
+  - Maintained internal tooling in Python.
+
+EDUCATION
+M.S. Computer Science, Tech Institute (2012 - 2014)
+B.S. Computer Science, Tech Institute (2008 - 2012)
+
+SKILLS
+Python, Django, Go, Kubernetes, AWS, PostgreSQL, Airflow, Docker, System Design, Java, Mentoring

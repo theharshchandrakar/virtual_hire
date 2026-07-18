@@ -1,0 +1,17 @@
+{
+  "slug": "resume_04_dense",
+  "candidate_name": "Alex Chen",
+  "expected_parsed_data": {
+    "work_history_min_count": 4,
+    "education_min_count": 2,
+    "skills": ["python", "django", "kubernetes", "aws", "postgresql"]
+  },
+  "requisition_matches": {
+    "req_backend_engineer": {
+      "expected_verdict_label_band": ["pass"],
+      "expected_min_matched_skills": 4
+    }
+  },
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}

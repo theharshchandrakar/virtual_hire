@@ -56,7 +56,7 @@
 | E2E (with frontend) `[PLANNED]` | **Playwright** (Python or TS bindings — match whichever language the frontend team standardizes tooling around; Playwright's own multi-language support makes this a non-issue either way). Ships its own Chromium/Firefox/WebKit browser binaries, so no separate browser-driver install/version-matching headache. | Not applicable yet | N/A |
 | Load / performance | **Locust** (Python-native, fits this codebase's existing language, scriptable scenarios) as the primary choice; **k6** (JS-based, better raw throughput/lower resource overhead per virtual user) as an alternative if Locust's overhead becomes limiting at higher concurrency; **JMeter** listed as a third option specifically if this ever needs to satisfy an enterprise/compliance requirement for a named, GUI-driven, Java-based tool — heavier to script and maintain than the other two, not the default recommendation | **Gap — no infra yet**, targets specified in §7.7 | Pre-pilot-launch, then on a schedule (not every PR) |
 | UAT | Persona-based manual scripts, sign-off tracked outside this repo (e.g. a checklist in the pilot-org rollout doc) | **Gap — no pilot org yet**, scripts specified in §7.8 | Before each new organization's pilot go-live |
-| Live LLM / Vector DB testing | Real `OPENROUTER_API_KEY` + real Voyage + real Qdrant — no mocks. See §7.9 for the full design. | **Gap — spec only**, no test files yet | Manual/scheduled only, never per-PR (cost + latency + vendor non-determinism) |
+| Live LLM / Vector DB testing | Real `OPENROUTER_API_KEY` + real Voyage + real Qdrant — no mocks. See §7.9 for the full design. | **Built** — `tests/live/test_golden_rag_live.py`, wired into CI as a required step. Skips cleanly (not a failure) until `OPENROUTER_API_KEY`/`VOYAGE_API_KEY` are added as repo secrets; makes real, required-to-pass calls once they are. | **Required, every PR/push to main** — a deliberate reversal of this row's original "never per-PR" recommendation (see §7.9's note on why) |
 | Security review | `code-review`/`security-review` skills (this repo's tooling) + the I2/I11 cross-tenant suite | Ad hoc today | Before merging auth/tenancy/PII-adjacent changes |
 | Defect / ticket management | **Jira** (`VHIRE` project, already provisioned — see §10) | Built (project exists), process defined here | Whenever a test — of any type above — finds a real defect |
 | Test reporting | `pytest-html` or `allure-pytest` for rich per-run reports; JUnit XML (`pytest --junitxml=`) for CI-native reporting; Locust/k6's own HTML/JSON summary export for load runs | **Gap — not wired into CI yet**, spec in §11 | Every CI run once wired up; every manual test session in the interim |
@@ -297,29 +297,31 @@ Persona-based, tied to the JTBDs in [docs/00-ideation.md](docs/00-ideation.md). 
 
 UAT sign-off for verdict-quality items (UAT-003, UAT-004) directly informs the open calibration questions in [docs/02-assumptions.md](docs/02-assumptions.md) (A24) and should be fed back into that doc, not just closed out silently. Every UAT defect gets a Jira ticket per §10, not just an informal note.
 
-### 7.9 Live LLM & Vector DB testing `[Gap — spec only, no test files yet]`
+### 7.9 Live LLM & Vector DB testing — **built, required in CI**
 
-Every test elsewhere in this catalog fakes OpenRouter/Voyage/Qdrant. That proves the *code path* is correct (right prompt built, right function called, right field written) — it proves nothing about whether the **real model** produces usable output, whether **real embeddings** retrieve semantically relevant chunks, or what **real latency** looks like. This tier closes that gap, deliberately kept separate from the default suite because it costs money, has non-deterministic output, and depends on third-party availability.
+Every other test in this catalog fakes OpenRouter/Voyage/Qdrant. That proves the *code path* is correct (right prompt built, right function called, right field written) — it proves nothing about whether the **real model** produces usable output or whether **real embeddings** retrieve semantically relevant chunks. This tier closes that gap.
 
-**Design:**
-- Location: `tests/live/` (new directory), marked with a custom pytest marker `@pytest.mark.live_llm`.
-- Trigger: `pytest -m live_llm`, never part of the default `pytest` invocation and never a required CI check. Run manually, or on a schedule (e.g. weekly) against `main`.
-- Gating: session-scoped fixture skips the entire file (not a hard failure) if `OPENROUTER_API_KEY`/`VOYAGE_API_KEY` aren't set to real-looking values — same "skip, don't fail, when unreachable" convention `tests/integration/conftest.py` already uses for Postgres.
-- Cost control: use the smallest/cheapest configured model for exploratory runs where the specific model doesn't matter (e.g. extraction JSON-validity checks), and the real configured `JUDGE_MODEL` only for the cases that specifically need to validate that model's output quality.
-- Assertions are looser than unit tests by necessity (model output isn't byte-identical run to run) — assert *shape* and *schema validity* always, assert *content quality* only against the golden answer keys in §8, with tolerance (e.g. "expected skill present in matched_skills" rather than "exact dict equality").
+**Revision note:** this section originally recommended keeping this tier manual/scheduled-only, off the required PR gate, given cost/non-determinism/vendor-availability tradeoffs. That recommendation was deliberately overridden — the required CI gate now runs real RAG calls (real Voyage embeddings, real Qdrant retrieval, a real OpenRouter Judge call) against the golden dataset (§8) on every PR/push to `main`, gated on `OPENROUTER_API_KEY`/`VOYAGE_API_KEY` repository secrets. Not a full reversal of every concern raised: extraction-quality (LIVE-001/002) and STT-quality (LIVE-007) cases below remain unbuilt, since they're not "RAG" specifically and the cost/latency argument still applies most to those; what's built is scoped to the RAG-specific path (resume/transcript verdict generation), the part explicitly asked for.
 
-| ID | Case | Priority |
-|---|---|---|
-| LIVE-001 | Extraction Agent, called with a real sample resume (§8's golden set) → returns valid JSON with non-empty `work_history`/`skills` matching the answer key's expected fields (allow partial credit — flag if match rate drops below a set threshold, e.g. 80%) | P0 |
-| LIVE-002 | Extraction Agent, called with a deliberately malformed/near-empty resume text → does not crash; either returns a minimal valid JSON shape or the caller's existing failure path (`parse_failed`) engages correctly | P1 |
-| LIVE-003 | Judge Agent, called with a real Scoring Engine output + real retrieved chunks (from a real Voyage-embedded, real-Qdrant-searched golden resume) → returns valid `{verdict_label, narrative}` JSON, `verdict_label` is one of the three allowed values, `narrative` is non-empty and references specifics (not generic filler — a human-reviewed pass/fail judgment, tracked as a UAT-003-style sign-off, not a strict assertion) | P0 |
-| LIVE-004 | Voyage `embed_chunks` on a real chunk of resume text → returns a 1024-dim vector (dimension check), and embedding the *same* text twice produces cosine similarity ≈ 1.0 (embedding stability check) | P0 |
-| LIVE-005 | Real Qdrant round-trip: upsert a golden resume's real embeddings, run a real semantic query for a skill known (from the answer key) to be present → the golden resume's chunk is retrieved in the top-k results | P0 |
-| LIVE-006 | Real Qdrant round-trip: run a semantic query for a skill known to be **absent** from a golden resume → confirm it is *not* artificially forced into top-k (sanity check that retrieval isn't just "always return everything") | P1 |
-| LIVE-007 | Whisper STT on a real short sample audio clip (§8's golden set) with a known transcript → resulting text has an acceptable word-error-rate against the golden transcript (exact match not expected/required) | P1 |
-| LIVE-008 | End-to-end latency measurement for LIVE-001/003/005/007 individually, logged (not just asserted pass/fail) — feeds LOAD-004's real-world target validation | P1 |
+**Design (as built):**
+- Location: `tests/live/test_golden_rag_live.py`, marked with the `live_llm` pytest marker (registered in `pyproject.toml`).
+- `pyproject.toml`'s `addopts = "-m \"not live_llm\""` excludes this file from a bare local `pytest` invocation (so a developer without vendor keys isn't blocked); CI explicitly runs `pytest -m live_llm tests/live` as its own required step, overriding that default.
+- Gating: a module-scoped fixture (`_require_live_vendor_keys`) skips the whole file — exit code 0, not a failure — if `OPENROUTER_API_KEY`/`VOYAGE_API_KEY` aren't configured, so this step is safe to merge before those secrets exist and becomes a real gate the moment they're added. Same "skip, don't fail, when unreachable" convention `tests/integration/conftest.py` already uses for Postgres.
+- Scope: real Qdrant collection provisioned per test run (throwaway `organization_id`, torn down after), real `embeddings.embed_chunks` calls, real `vector_store.upsert_points`/`search`, real `judge_agent.run_judge` via the configured `JUDGE_MODEL` (`openrouter/deepseek/deepseek-v4-flash` by default — see §7.9.1). No Postgres involved in this file (that plumbing is `tests/integration/test_golden_data_seeding.py`'s job, §8).
+- Assertions are looser than unit tests by necessity (model output isn't byte-identical run to run) — deterministic-score checks are exact, `verdict_label` is checked against the golden answer key's *band* (e.g. `{pass, review}`, not a single exact value), `narrative` is checked for non-emptiness, not exact content.
 
-**What this tier deliberately does not do:** it does not gate merges, it does not run on every PR, and it is not a substitute for the mocked unit/functional tests — those still need to exist and pass on every commit regardless of how well the live tier performs on any given day.
+| ID | Case | File | Priority | Status |
+|---|---|---|---|---|
+| LIVE-RAG-001 | Real embed + real Qdrant retrieval + real Judge call for a strong-match resume vs. its requisition → verdict label in the golden answer key's expected band | `tests/live/test_golden_rag_live.py::test_live_resume_verdict_matches_expected_band[resume_01_strong_backend_match-req_backend_engineer]` | P0 | ✅ Built |
+| LIVE-RAG-002 | Same, for a deliberately weak-match resume → verdict label in the (different) expected band | same file, `[resume_02_weak_backend_match-...]` | P0 | ✅ Built |
+| LIVE-RAG-003 | Real embed + real Qdrant retrieval + real Judge call for a transcript that clears the minimum-length rubric | same file, `test_live_transcript_verdict_produces_a_valid_verdict[transcript_01_strong]` | P0 | ✅ Built |
+| LIVE-RAG-004 | Same, for a transcript that's deliberately below the minimum-length rubric (Scoring Engine flag still fires; Judge still produces a valid verdict per I12's "Judge runs after scoring, not instead of it") | same file, `[transcript_02_short]` | P0 | ✅ Built |
+| LIVE-001 | Extraction Agent, called with a real sample resume → returns valid JSON matching the answer key's expected fields | — | P0 | ❌ Not built (extraction-quality, not RAG-specific — see revision note) |
+| LIVE-002 | Extraction Agent, called with malformed/near-empty resume text → doesn't crash | — | P1 | ❌ Not built |
+| LIVE-007 | Whisper STT on a real short audio clip with a known transcript → acceptable word-error-rate | — | P1 | ❌ Not built — blocked on §8's audio corpus not existing yet |
+| LIVE-008 | Per-case latency logging, feeding LOAD-004 | — | P1 | ❌ Not built |
+
+**Cost/reliability note:** at DeepSeek V4 Flash's published pricing (~$0.10/$0.20 per million prompt/completion tokens) the four LIVE-RAG-* cases cost a small fraction of a cent per CI run — cost is not the binding constraint of running this on every PR. **OpenRouter/Voyage availability is** — a transient vendor outage now fails CI for everyone, a more concentrated version of the "no fallback LLM provider" risk EPIC.md already flags. If this proves too flaky in practice, the mitigation is a retry-once-on-transient-error wrapper in the CI step, not reverting to mocks-only.
 
 ---
 
@@ -335,22 +337,22 @@ Every test type above that touches real content (live LLM/vector tests in §7.9,
 
 This is a direct extension of I2/I9's PII posture, not a separate policy — a test environment is not exempt from the same rules production data handling follows.
 
-### 8.2 What's needed
+### 8.2 What exists today
 
-| Dataset | Contents | Answer key | Used by |
+| Dataset | Contents | Answer key | Status |
 |---|---|---|---|
-| **Golden resumes** | ~15–20 synthetic resumes spanning: clean well-structured PDF, messy/dense PDF, plain-text, a resume with sparse/missing sections, varied seniority levels and skill sets (per A5/A7's own uncertainty about real-world resume structure — this set should deliberately include the "hard" cases, not just the easy ones) | A paired `*.expected.json` per resume: expected `work_history`/`education`/`skills` (for Extraction Agent grading, LIVE-001), expected `matched_skills` against 2–3 sample requisitions (for Scoring Engine + Judge grading, LIVE-003, UAT-002/003) | LIVE-001–006, LOAD-001–003, UAT-002/003 |
-| **Golden requisitions** | 3–5 sample job requisitions with `scorecard_template.required_skills` populated, spanning at least one role each golden resume set is a strong/weak/partial match for | Expected pass/review/fail band per (resume, requisition) pair, calibrated by a human reviewer once, then used as the regression baseline for future model/prompt changes | LIVE-003, UAT-003 |
-| **Golden transcripts** | 5–10 synthetic interview transcripts of varying length/quality (including at least one deliberately below any minimum-length rubric threshold, to exercise `transcript_review`'s flag) | Expected `score_transcript` flags, expected verdict band | UT-021 (already covered, no live data needed), LIVE-003 equivalent for transcripts, UAT-004/005 |
-| **Golden audio clips** | 3–5 short (under a minute) synthetic or donated-and-anonymized audio clips with a known correct transcript | The known correct transcript text, for word-error-rate comparison | LIVE-007, UAT-005 |
-| **Bulk synthetic volume** | A scripted generator (not hand-authored) producing hundreds of resumes at A14's upper-bound volume, quality not curated (this set is for throughput, not quality grading) | None needed — these are throughput filler, not graded | LOAD-001–005 |
+| **Golden resumes** | 5 synthetic resumes (`tests/fixtures/golden/resumes/`): a strong backend match, a weak/frontend-only match, a sparse/unstructured one, a dense multi-role one, and a prose-only one with no explicit skills section — deliberately including the "hard" cases per A5/A7's own uncertainty about real-world resume structure, not just the easy ones | `*.expected.json` per resume: `expected_parsed_data` (skill list + work-history/education counts) and, per requisition, an `expected_verdict_label_band` + `expected_min_matched_skills` | ✅ Built — `tests/services/test_golden_data.py` (integrity + real Scoring Engine cross-check) and `tests/live/test_golden_rag_live.py` (real RAG+Judge grading) both consume it |
+| **Golden requisitions** | 2 sample job requisitions (`tests/fixtures/golden/requisitions/`) — a backend role and a frontend role, each with `scorecard_template.required_skills` populated, deliberately chosen so the golden resumes span strong/weak matches against both | Requisitions are structured input, not something graded — resumes' answer keys carry the expected match outcome instead | ✅ Built |
+| **Golden transcripts** | 3 synthetic interview transcripts (`tests/fixtures/golden/transcripts/`): a long system-design discussion, a deliberately short one (below the minimum-length rubric), and a long technical deep-dive | `*.expected.json` per transcript: `expected_scoring` (word-count threshold, `meets_minimum_length`, `expected_flags`) | ✅ Built |
+| **Golden audio clips** | Real or synthesized speech audio for Whisper WER testing (LIVE-007) | The known correct transcript text | ❌ **Not built** — requires either a recording or a TTS synthesis step this pass didn't produce; tracked as an explicit gap in §13, not silently skipped |
+| **Bulk synthetic volume** | A scripted generator producing hundreds of resumes at A14's upper-bound volume for load testing, quality not curated | None needed — throughput filler, not graded | ❌ Not built — blocked on load-test infra itself (§7.7) existing first |
 
 ### 8.3 Storage & maintenance
 
-- Location: `tests/fixtures/golden/` (new directory) — `resumes/`, `requisitions/`, `transcripts/`, `audio/`, each file paired with a `.expected.json` of the same basename.
-- Ownership: whoever adds a new golden case is responsible for hand-verifying its answer key once at creation time (a human, not the model being tested, decides ground truth) — noted as a comment/metadata field in the `.expected.json` itself (`"verified_by"`, `"verified_at"`).
-- Versioning: if a model/prompt change causes a previously-passing LIVE-* case to start failing against its golden answer key, that's a real signal (either a regression, or the golden answer key itself needs revisiting) — never silently update the golden file to match new output without a human deciding which one was wrong.
-- This dataset does not exist yet — building even the minimum viable slice (5 resumes + answer keys, 2 requisitions) is a prerequisite for LIVE-001–006 and UAT-002/003 being meaningful rather than just mechanically executed. Tracked in §13.
+- Location: `tests/fixtures/golden/` — `resumes/`, `requisitions/`, `transcripts/` exist; `audio/` does not yet (see above). Loader: `tests/fixtures/golden/loader.py` (`load_golden_resumes()`/`load_golden_requisitions()`/`load_golden_transcripts()`), consumed by both the integrity check and the live-RAG tier so there's one parsing implementation, not two.
+- Ownership: whoever adds a new golden case is responsible for hand-verifying its answer key once at creation time (a human, not the model being tested, decides ground truth) — recorded as `"verified_by"`/`"verified_at"` fields in the `.expected.json` itself.
+- Versioning: if a model/prompt change causes a previously-passing LIVE-RAG-* case to start failing against its golden answer key, that's a real signal (either a regression, or the golden answer key itself needs revisiting) — never silently update the golden file to match new output without a human deciding which one was wrong.
+- What consumes this today: `tests/services/test_golden_data.py` (pure integrity + real-Scoring-Engine cross-check, no network, runs every `pytest` invocation), `tests/integration/test_golden_data_seeding.py` (seeds the golden resumes/requisitions as real Postgres rows via docker-compose/CI — the relational half of "seed the golden dataset"), and `tests/live/test_golden_rag_live.py` (the real Voyage/Qdrant/OpenRouter half, §7.9).
 
 ### 8.4 Fixture code (existing, unrelated to golden data)
 
@@ -414,12 +416,21 @@ Given this is currently a small/solo-adjacent team (per this repo's own `CONTRIB
 
 ## 12. CI/CD gating
 
-**Today** ([.github/workflows/ci.yml](.github/workflows/ci.yml)): `ruff check` → `alembic upgrade head` → `pytest`, against real Postgres/Redis/Qdrant service containers, required on every PR to `main` and every push to `main`.
+**Today** ([.github/workflows/ci.yml](.github/workflows/ci.yml)), all in one required job, on every PR to `main` and every push to `main`:
+1. `ruff check`
+2. **Postgres and Redis started via `docker compose up -d --wait`** (the repo's own `docker-compose.yml` — the same infra definition local dev uses, not a separately-maintained GitHub Actions `services:` block).
+3. **Qdrant started via `docker compose up -d qdrant`**, readiness confirmed by a host-side `curl` wait loop (Qdrant's image doesn't ship a verified healthcheck command, so waiting is done from the runner rather than trusted to an unverified in-container check).
+4. `alembic upgrade head`
+5. `pytest` — unit, functional-gap-aside, and integration tests (`live_llm`-marked tests excluded by `pyproject.toml`'s `addopts`).
+6. **`pytest -m live_llm tests/live`** — real Voyage + Qdrant + OpenRouter calls against the golden dataset (§7.9), reading `OPENROUTER_API_KEY`/`VOYAGE_API_KEY` from repository secrets. Skips cleanly (exit 0) until those secrets are added; becomes a real, required-to-pass gate the moment they are.
+7. `docker compose down -v` (always, including on failure).
+
+This is a deliberate reversal from this section's original recommendation (live-vendor and load testing kept off the required gate) — see §7.9's revision note for why, and the tradeoff it accepts (OpenRouter/Voyage availability is now a real source of required-check flakiness, not just a hypothetical one).
 
 **Recommended additions, in priority order:**
 1. **The I2/I11 cross-tenant suite (§7.3's INT-020/021/022), once built, as its own required check** — separate from the general `pytest` job so it can never be silently skipped or bundled into "tests passed" without being individually visible in the PR checks list. This is what [docs/09-roadmap.md](docs/09-roadmap.md) means by "release blocker."
 2. **Functional/API tests (§7.2)** folded into the existing `pytest` job once built — no new CI job needed, just more test files.
-3. **A scheduled (not per-PR) job for the E2E script (§7.6)**, **the live LLM/Vector DB tier (§7.9)**, and **load tests (§7.7)** — all three are slower, cost money, or are non-deterministic, and shouldn't gate every commit, but should run on a cadence (e.g. nightly/weekly against `main`) so regressions surface within days, not at the next pilot demo.
+3. **A scheduled (not per-PR) job for the E2E script (§7.6)** and **load tests (§7.7)** — both are slower and shouldn't gate every commit the way the now-required live-RAG tier does; run on a cadence (e.g. nightly/weekly against `main`) so regressions surface within days, not at the next pilot demo.
 4. **JUnit XML + coverage reporting** (`pytest --cov --junitxml=`) surfaced in PRs, once the functional-test gap is closed enough that a coverage number means something — premature right now given §7.2's gap would just measure "how much of the untested route layer is untested."
 
 ---
@@ -430,10 +441,10 @@ In priority order:
 
 1. **I2/I11 cross-tenant suite (§7.3, INT-020/021/022).** The single most important gap — everything else in this plan assumes tenant isolation holds, and right now that's asserted by design/code review, not proven by a test that would fail if a future change broke it.
 2. **Functional/API tests (§7.2).** Every route's actual HTTP behavior (status codes, validation errors, auth enforcement) is currently unverified except by manual smoke testing.
-3. **Golden seed dataset (§8.2).** Blocks the live LLM/vector tier (§7.9) and quality-focused UAT (UAT-002/003) from being meaningful — needs at minimum 5 golden resumes + 2 requisitions + answer keys before those test cases are anything more than a spec.
-4. **Live LLM & Vector DB test tier (§7.9).** Zero test files exist; this is the only place real model/embedding quality and real latency get validated at all today.
-5. **Backend E2E script (§7.6, E2E-001–004).** Nothing today proves the full chain (upload → parse → embed → verdict) works end-to-end without a human running the smoke checklist by hand.
-6. **Load testing infra (§7.7).** Zero tooling stood up; first step is a Locust script against docker-compose, not a staging environment.
-7. **Test reporting wiring (§11).** JUnit XML/coverage/HTML reports aren't produced anywhere yet — today's only artifact is raw CI console output.
-8. **Frontend testing (§3.3, §7.6, §7.8 planned rows).** Blocked entirely on frontend work starting — nothing to test yet.
-9. **E8–E21 test coverage** (pipeline/scorecards, notifications, privacy/deletion, observability, verdict data model extensions, proctoring) — tracked in [EPIC.md](EPIC.md)'s own per-epic Definition of Done; each epic's test cases should be added to this doc's §7 tables as that epic is built, not deferred to a future testing-plan rewrite.
+3. **Backend E2E script (§7.6, E2E-001–004).** Nothing today proves the full chain (upload → parse → embed → verdict) works end-to-end without a human running the smoke checklist by hand.
+4. **Extraction-quality and STT-quality live cases (LIVE-001/002/007, §7.9).** The RAG-specific live tier (embedding/retrieval/Judge) is built and required in CI; Extraction Agent output-quality grading and Whisper WER are not — the latter is additionally blocked on the golden audio corpus (§8.2) not existing.
+5. **Load testing infra (§7.7).** Zero tooling stood up; first step is a Locust script against docker-compose, not a staging environment.
+6. **Test reporting wiring (§11).** JUnit XML/coverage/HTML reports aren't produced anywhere yet — today's only artifact is raw CI console output.
+7. **Frontend testing (§3.3, §7.6, §7.8 planned rows).** Blocked entirely on frontend work starting — nothing to test yet.
+8. **E8–E21 test coverage** (pipeline/scorecards, notifications, privacy/deletion, observability, verdict data model extensions, proctoring) — tracked in [EPIC.md](EPIC.md)'s own per-epic Definition of Done; each epic's test cases should be added to this doc's §7 tables as that epic is built, not deferred to a future testing-plan rewrite.
+9. **`OPENROUTER_API_KEY`/`VOYAGE_API_KEY` repository secrets need to actually be added** for §7.9's live-RAG CI step to do anything beyond skip — until then, "required" is aspirational for that step specifically (it passes vacuously). Owner: whoever has repo admin access to add secrets (not something this codebase can self-serve).

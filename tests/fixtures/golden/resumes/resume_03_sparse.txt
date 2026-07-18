@@ -1,0 +1,5 @@
+Sam Ortiz
+
+Worked at a startup doing various engineering tasks.
+
+Skills: some Python, a bit of SQL

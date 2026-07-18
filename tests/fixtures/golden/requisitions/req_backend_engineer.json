@@ -1,0 +1,11 @@
+{
+  "slug": "req_backend_engineer",
+  "title": "Senior Backend Engineer",
+  "department": "Engineering",
+  "scorecard_template": {
+    "required_skills": ["python", "kubernetes", "postgresql", "aws", "django"],
+    "fields": ["technical_depth", "system_design", "communication"]
+  },
+  "verified_by": "kunal",
+  "verified_at": "2026-07-18"
+}
