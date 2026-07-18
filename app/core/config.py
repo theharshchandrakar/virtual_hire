@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     environment: str = "development"
+    cors_allowed_origins: str = "http://localhost:5173"
 
     # Postgres (relational data only) - docs/05-data-model.md
     database_url: str
@@ -73,6 +74,10 @@ class Settings(BaseSettings):
 
     # Email delivery (transactional)
     email_provider_api_key: str = ""
+
+    def get_cors_allowed_origins(self) -> list[str]:
+        """Return the configured CORS origins as a clean list."""
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 @lru_cache
