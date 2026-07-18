@@ -15,6 +15,8 @@ from app.models.job_requisition import JobRequisition
 from app.models.organization import Organization
 from app.models.resume import Resume
 from app.models.scorecard import Scorecard
+from app.models.transcript import Transcript
+from app.models.verdict import Verdict
 
 __all__ = [
     "AnalysisOutput",
@@ -27,4 +29,6 @@ __all__ = [
     "Organization",
     "Resume",
     "Scorecard",
+    "Transcript",
+    "Verdict",
 ]

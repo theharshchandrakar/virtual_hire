@@ -18,6 +18,8 @@ EXPECTED_TABLES = {
     "scorecards",
     "analysis_outputs",
     "audit_log",
+    "transcripts",
+    "verdicts",
 }
 
 ORG_SCOPED_TABLES = EXPECTED_TABLES - {"organizations"}
@@ -99,3 +101,32 @@ def test_analysis_outputs_application_id_unique():
 
 def test_audit_log_has_no_updated_at_column():
     assert "updated_at" not in Base.metadata.tables["audit_log"].columns
+
+
+def test_transcripts_interview_id_unique():
+    """One Transcript per Interview at most."""
+    col = Base.metadata.tables["transcripts"].columns["interview_id"]
+    assert not col.nullable
+    assert col.unique
+
+
+def test_verdicts_deterministic_score_not_nullable():
+    """I12: a Verdict cannot exist without a Scoring Engine result."""
+    col = Base.metadata.tables["verdicts"].columns["deterministic_score"]
+    assert not col.nullable
+
+
+def test_verdicts_unique_per_application_and_service_type():
+    table = Base.metadata.tables["verdicts"]
+    constraint = next(
+        c for c in table.constraints if getattr(c, "name", None) == "uq_verdicts_application_service_type"
+    )
+    assert {col.name for col in constraint.columns} == {"application_id", "service_type"}
+
+
+def test_verdicts_resume_id_and_interview_id_are_both_nullable():
+    """Exclusivity (exactly one set, per service_type) is DB-trigger-enforced
+    (see the transcripts_and_verdicts migration), not a NOT NULL constraint."""
+    table = Base.metadata.tables["verdicts"]
+    assert table.columns["resume_id"].nullable
+    assert table.columns["interview_id"].nullable

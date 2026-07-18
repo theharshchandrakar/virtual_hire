@@ -74,3 +74,31 @@ class ScorecardStatus(str, enum.Enum):
     draft = "draft"
     submitted = "submitted"
     amended = "amended"
+
+
+# --- Verdict-service enums [New 2026-07-16 pivot] - see docs/05-data-model.md's
+# "Verdict-service tables" section. Scoped to transcripts + verdicts for this
+# session (resume/transcript RAG + scoring); proctoring/assignment enums are
+# not added here - out of scope, see vector.md.
+
+
+class TranscriptStatus(str, enum.Enum):
+    pending = "pending"
+    available = "available"
+    unavailable = "unavailable"
+
+
+class TranscriptSource(str, enum.Enum):
+    platform_provided = "platform_provided"
+    generated_stt = "generated_stt"
+
+
+class VerdictServiceType(str, enum.Enum):
+    resume_analysis = "resume_analysis"
+    transcript_assignment_review = "transcript_assignment_review"
+
+
+class VerdictLabel(str, enum.Enum):
+    pass_ = "pass"
+    review = "review"
+    fail = "fail"
