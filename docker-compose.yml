@@ -55,11 +55,27 @@ services:
       qdrant:
         condition: service_started
 
-  # Celery worker services (parsing, embedding, crew, notification - one
-  # task definition each per docs/07-technical-stack.md and EPIC.md's E14)
-  # get added here once E5 lands a real Celery app to point `-A` at. No
-  # app/workers/ task modules exist yet (scaffold only), so a worker
-  # service defined today would just crash-loop.
+  # Single Celery worker consuming every queue (parsing, embedding, crew,
+  # default) for local dev - see docs/07-technical-stack.md's "separate
+  # task definitions per worker type" note for the production split this
+  # simplifies away.
+  worker:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sift:sift@postgres:5432/sift
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+    command: celery -A app.workers.celery_app worker --loglevel=info -Q parsing,embedding,crew,default
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
 
 volumes:
   postgres_data:
